@@ -1,0 +1,234 @@
+use crate::cell::Cell;
+use crate::edge::EdgeState;
+use crate::puzzle::Puzzle;
+use crate::solution::Solution;
+
+pub fn is_solved(puzzle: &Puzzle, solution: &Solution) -> bool {
+    assert_eq!(puzzle.width(), solution.width());
+    assert_eq!(puzzle.height(), solution.height());
+    let w = puzzle.width();
+    let h = puzzle.height();
+
+    if !clues_satisfied(puzzle, solution) {
+        return false;
+    }
+    if !vertex_degrees_valid(solution, w, h) {
+        return false;
+    }
+    is_single_loop(solution, w, h)
+}
+
+fn clues_satisfied(puzzle: &Puzzle, solution: &Solution) -> bool {
+    for y in 0..puzzle.height() {
+        for x in 0..puzzle.width() {
+            if let Cell::Clue(n) = puzzle.cell(x, y) {
+                if cell_loop_edges(solution, x, y) != n as usize {
+                    return false;
+                }
+            }
+        }
+    }
+    true
+}
+
+fn vertex_degrees_valid(solution: &Solution, w: usize, h: usize) -> bool {
+    for y in 0..=h {
+        for x in 0..=w {
+            let d = vertex_loop_degree(solution, x, y, w, h);
+            if d != 0 && d != 2 {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+fn is_single_loop(solution: &Solution, w: usize, h: usize) -> bool {
+    let total = count_loop_edges(solution);
+    if total == 0 {
+        return false;
+    }
+    let Some(start) = first_vertex_with_loop(solution, w, h) else {
+        return false;
+    };
+    let walked = walk_cycle(solution, start, w, h);
+    walked == total
+}
+
+fn cell_loop_edges(s: &Solution, x: usize, y: usize) -> usize {
+    let mut n = 0;
+    if s.h_edge(x, y) == EdgeState::Loop {
+        n += 1;
+    }
+    if s.h_edge(x, y + 1) == EdgeState::Loop {
+        n += 1;
+    }
+    if s.v_edge(x, y) == EdgeState::Loop {
+        n += 1;
+    }
+    if s.v_edge(x + 1, y) == EdgeState::Loop {
+        n += 1;
+    }
+    n
+}
+
+fn vertex_loop_degree(s: &Solution, x: usize, y: usize, w: usize, h: usize) -> usize {
+    loop_neighbors(s, x, y, w, h).len()
+}
+
+fn loop_neighbors(s: &Solution, x: usize, y: usize, w: usize, h: usize) -> Vec<(usize, usize)> {
+    let mut out = Vec::with_capacity(2);
+    if x > 0 && s.h_edge(x - 1, y) == EdgeState::Loop {
+        out.push((x - 1, y));
+    }
+    if x < w && s.h_edge(x, y) == EdgeState::Loop {
+        out.push((x + 1, y));
+    }
+    if y > 0 && s.v_edge(x, y - 1) == EdgeState::Loop {
+        out.push((x, y - 1));
+    }
+    if y < h && s.v_edge(x, y) == EdgeState::Loop {
+        out.push((x, y + 1));
+    }
+    out
+}
+
+fn count_loop_edges(s: &Solution) -> usize {
+    let mut n = 0;
+    for y in 0..=s.height() {
+        for x in 0..s.width() {
+            if s.h_edge(x, y) == EdgeState::Loop {
+                n += 1;
+            }
+        }
+    }
+    for y in 0..s.height() {
+        for x in 0..=s.width() {
+            if s.v_edge(x, y) == EdgeState::Loop {
+                n += 1;
+            }
+        }
+    }
+    n
+}
+
+fn first_vertex_with_loop(s: &Solution, w: usize, h: usize) -> Option<(usize, usize)> {
+    for y in 0..=h {
+        for x in 0..=w {
+            if vertex_loop_degree(s, x, y, w, h) > 0 {
+                return Some((x, y));
+            }
+        }
+    }
+    None
+}
+
+/// Walks the cycle starting from `start` until it returns, counting edges.
+/// Assumes every vertex on the cycle has degree exactly 2.
+fn walk_cycle(s: &Solution, start: (usize, usize), w: usize, h: usize) -> usize {
+    let mut prev: Option<(usize, usize)> = None;
+    let mut current = start;
+    let mut count = 0;
+    loop {
+        let neighbors = loop_neighbors(s, current.0, current.1, w, h);
+        let next = neighbors.iter().copied().find(|&n| Some(n) != prev);
+        let Some(next) = next else {
+            return count;
+        };
+        prev = Some(current);
+        current = next;
+        count += 1;
+        if current == start {
+            return count;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cell::Cell::{Clue, Empty};
+
+    fn set_loop_h(s: &mut Solution, edges: &[(usize, usize)]) {
+        for &(x, y) in edges {
+            s.set_h_edge(x, y, EdgeState::Loop);
+        }
+    }
+
+    fn set_loop_v(s: &mut Solution, edges: &[(usize, usize)]) {
+        for &(x, y) in edges {
+            s.set_v_edge(x, y, EdgeState::Loop);
+        }
+    }
+
+    fn border_2x2_loop() -> Solution {
+        let mut s = Solution::empty(2, 2);
+        set_loop_h(&mut s, &[(0, 0), (1, 0), (0, 2), (1, 2)]);
+        set_loop_v(&mut s, &[(0, 0), (0, 1), (2, 0), (2, 1)]);
+        s
+    }
+
+    #[test]
+    fn solves_2x2_border_loop() {
+        let p = Puzzle::new(2, 2, vec![Clue(2); 4]);
+        assert!(is_solved(&p, &border_2x2_loop()));
+    }
+
+    #[test]
+    fn solves_1x1_loop_around_empty_cell() {
+        let p = Puzzle::new(1, 1, vec![Empty]);
+        let mut s = Solution::empty(1, 1);
+        set_loop_h(&mut s, &[(0, 0), (0, 1)]);
+        set_loop_v(&mut s, &[(0, 0), (1, 0)]);
+        assert!(is_solved(&p, &s));
+    }
+
+    #[test]
+    fn rejects_empty_solution() {
+        let p = Puzzle::new(2, 2, vec![Clue(2); 4]);
+        assert!(!is_solved(&p, &Solution::empty(2, 2)));
+    }
+
+    #[test]
+    fn rejects_clue_mismatch() {
+        let p = Puzzle::new(2, 2, vec![Clue(3), Clue(2), Clue(2), Clue(2)]);
+        assert!(!is_solved(&p, &border_2x2_loop()));
+    }
+
+    #[test]
+    fn rejects_open_path() {
+        let p = Puzzle::new(2, 2, vec![Clue(2); 4]);
+        let mut s = Solution::empty(2, 2);
+        set_loop_h(&mut s, &[(0, 0), (1, 0)]);
+        set_loop_v(&mut s, &[(2, 0)]);
+        assert!(!is_solved(&p, &s));
+    }
+
+    #[test]
+    fn rejects_branch_with_matching_clues() {
+        let p = Puzzle::new(2, 2, vec![Clue(3); 4]);
+        let mut s = border_2x2_loop();
+        set_loop_v(&mut s, &[(1, 0), (1, 1)]);
+        assert!(!is_solved(&p, &s));
+    }
+
+    #[test]
+    fn rejects_two_separate_loops() {
+        let p: Puzzle = "4x1\na11a".parse().unwrap();
+        let mut s = Solution::empty(4, 1);
+        set_loop_h(&mut s, &[(0, 0), (0, 1), (3, 0), (3, 1)]);
+        set_loop_v(&mut s, &[(0, 0), (1, 0), (3, 0), (4, 0)]);
+        assert!(!is_solved(&p, &s));
+    }
+
+    #[test]
+    fn excluded_edges_are_not_loop() {
+        let p = Puzzle::new(2, 2, vec![Clue(2); 4]);
+        let mut s = border_2x2_loop();
+        s.set_v_edge(1, 0, EdgeState::Excluded);
+        s.set_v_edge(1, 1, EdgeState::Excluded);
+        s.set_h_edge(0, 1, EdgeState::Excluded);
+        s.set_h_edge(1, 1, EdgeState::Excluded);
+        assert!(is_solved(&p, &s));
+    }
+}

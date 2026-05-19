@@ -1,0 +1,12 @@
+[package]
+name = "slitherlink-cli"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "slitherlink"
+path = "src/main.rs"
+
+[dependencies]
+slitherlink-core = { path = "../core" }

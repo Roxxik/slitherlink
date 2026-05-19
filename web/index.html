@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>Slitherlink</title>
+  <link data-trunk rel="rust" href="../wasm/Cargo.toml" />
+  <link data-trunk rel="copy-file" href="main.js" />
+  <link data-trunk rel="copy-dir" href="../puzzles" />
+  <style>
+    * { box-sizing: border-box; }
+    html, body { overflow: hidden; height: 100%; }
+    body {
+      font-family: ui-sans-serif, sans-serif;
+      margin: 0;
+      color: #222;
+      background: #fafafa;
+    }
+
+    /* --- Top bar --- */
+    #topbar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 3rem;
+      background: #fff;
+      border-bottom: 1px solid #e0e0e0;
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0 0.75rem;
+      z-index: 10;
+    }
+    #title { font-weight: 600; font-size: 1rem; }
+    #status {
+      font-family: ui-monospace, monospace;
+      font-size: 0.8rem;
+      padding: 0.2rem 0.5rem;
+      background: #f3f3f3;
+      border-radius: 4px;
+      color: #555;
+    }
+    #status.ok { background: #d6f5d6; color: #2d5a2d; }
+
+    /* --- Context menu --- */
+    #menu-wrap { position: relative; margin-left: auto; }
+    #menu-button {
+      background: none;
+      border: none;
+      padding: 0.4rem;
+      cursor: pointer;
+      color: #222;
+      display: flex;
+      align-items: center;
+      border-radius: 4px;
+    }
+    #menu-button:hover { background: #f0f0f0; }
+
+    #menu {
+      position: absolute;
+      top: calc(100% + 4px);
+      right: 0;
+      background: #fff;
+      border: 1px solid #e0e0e0;
+      border-radius: 4px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+      margin: 0;
+      padding: 0.25rem 0;
+      list-style: none;
+      min-width: 160px;
+    }
+    #menu[hidden] { display: none; }
+    #menu li button {
+      display: block;
+      width: 100%;
+      text-align: left;
+      background: none;
+      border: none;
+      padding: 0.55rem 1rem;
+      cursor: pointer;
+      font: inherit;
+      color: #222;
+    }
+    #menu li button:hover { background: #f5f5f5; }
+
+    /* --- Puzzle area --- */
+    #puzzle {
+      position: fixed;
+      top: 3rem;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      touch-action: none;       /* gestures handled by JS; no native scroll/zoom on this area */
+      user-select: none;
+    }
+    #puzzle svg { display: block; }
+
+    /* --- Action buttons (bottom-right) --- */
+    #action-buttons {
+      position: fixed;
+      right: 1rem;
+      bottom: 1rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      padding: 0.5rem;
+      background: rgba(255, 255, 255, 0.88);
+      border-radius: 1.75rem;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.12);
+      z-index: 10;
+    }
+    #action-buttons button {
+      width: 3rem;
+      height: 3rem;
+      border-radius: 50%;
+      background: transparent;
+      border: none;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      color: #222;
+      padding: 0;
+    }
+    #action-buttons button:hover { background: #f1f1f1; }
+    #action-buttons button:disabled { color: #bbb; cursor: not-allowed; }
+  </style>
+</head>
+<body>
+  <header id="topbar">
+    <div id="title">Slitherlink</div>
+    <div id="status">initialising</div>
+    <div id="menu-wrap">
+      <button id="menu-button" aria-label="Menu" aria-haspopup="true" aria-expanded="false">
+        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+          <path stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none" d="M4 6h16M4 12h16M4 18h16" />
+        </svg>
+      </button>
+      <ul id="menu" role="menu" hidden>
+        <li role="none"><button role="menuitem" data-action="restart">Restart</button></li>
+      </ul>
+    </div>
+  </header>
+
+  <main id="puzzle">loading...</main>
+
+  <div id="action-buttons">
+    <button data-action="undo" aria-label="Undo">
+      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+        <path stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" d="M9 14L4 9l5-5M4 9h11a5 5 0 0 1 5 5v0a5 5 0 0 1-5 5h-6" />
+      </svg>
+    </button>
+    <button data-action="redo" aria-label="Redo">
+      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+        <path stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" d="M15 14l5-5-5-5M20 9H9a5 5 0 0 0-5 5v0a5 5 0 0 0 5 5h6" />
+      </svg>
+    </button>
+  </div>
+
+  <script type="module" src="main.js"></script>
+</body>
+</html>
