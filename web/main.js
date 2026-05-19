@@ -21,6 +21,7 @@ const HIT_DEBUG = false;     // outline hit targets in red
 
 // --- Edge appearance (all in grid-space units) ---
 const LOOP_STROKE = '#222';
+const BAD_LOOP_STROKE = '#e60000';  // vertex deg >=3, clue overflow, or premature closed loop
 const LOOP_WIDTH = 0.08;
 const EXCLUDED_STROKE = '#888';
 const EXCLUDED_WIDTH = 0.02;
@@ -64,6 +65,10 @@ let solution;
 let cellColors;
 // edgeKey -> 'L' | 'X'  (user's canonical input; SoftExclude never appears)
 let userEdges;
+// Snapshots of {userEdges, cellColors} for undo/redo. Each click pushes onto
+// undoStack and clears redoStack; undo moves a snapshot from undo to redo.
+let undoStack = [];
+let redoStack = [];
 // Camera state — viewBox `{x, y, w, h}` persisted across renders. `null` = use base from puzzle dims.
 let viewBoxState = null;
 let baseViewBox = null;
@@ -90,6 +95,94 @@ function cellLoopCount(x, y) {
   if (solution.vEdge(x, y) === EdgeState.Loop) n++;
   if (solution.vEdge(x + 1, y) === EdgeState.Loop) n++;
   return n;
+}
+
+// Loop edges incident to vertex (vx, vy), as `[axis, x, y]` triples.
+function vertexLoopEdges(vx, vy) {
+  const { EdgeState } = window.wasmBindings;
+  const w = puzzle.width();
+  const h = puzzle.height();
+  const out = [];
+  if (vx > 0 && solution.hEdge(vx - 1, vy) === EdgeState.Loop) out.push(['h', vx - 1, vy]);
+  if (vx < w && solution.hEdge(vx, vy) === EdgeState.Loop) out.push(['h', vx, vy]);
+  if (vy > 0 && solution.vEdge(vx, vy - 1) === EdgeState.Loop) out.push(['v', vx, vy - 1]);
+  if (vy < h && solution.vEdge(vx, vy) === EdgeState.Loop) out.push(['v', vx, vy]);
+  return out;
+}
+
+function cellLoopEdges(x, y) {
+  const { EdgeState } = window.wasmBindings;
+  const edges = [['h', x, y], ['h', x, y + 1], ['v', x, y], ['v', x + 1, y]];
+  return edges.filter(([a, ex, ey]) =>
+    (a === 'h' ? solution.hEdge(ex, ey) : solution.vEdge(ex, ey)) === EdgeState.Loop);
+}
+
+// Returns the set of edgeKeys that should render in red:
+//   - any loop edge incident to a vertex with degree >= 3
+//   - all four loop edges around a clue cell whose loop count already exceeds the clue
+//   - every edge of a closed loop component, when the puzzle isn't yet solved
+function findBadEdges() {
+  const { isSolved } = window.wasmBindings;
+  const w = puzzle.width();
+  const h = puzzle.height();
+  const bad = new Set();
+
+  for (let y = 0; y <= h; y++) {
+    for (let x = 0; x <= w; x++) {
+      const edges = vertexLoopEdges(x, y);
+      if (edges.length >= 3) {
+        for (const [a, ex, ey] of edges) bad.add(edgeKey(a, ex, ey));
+      }
+    }
+  }
+
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const clue = puzzle.clue(x, y);
+      if (clue === undefined) continue;
+      const edges = cellLoopEdges(x, y);
+      if (edges.length > clue) {
+        for (const [a, ex, ey] of edges) bad.add(edgeKey(a, ex, ey));
+      }
+    }
+  }
+
+  // Closed-loop check: walk each component of the loop-edge graph; if every
+  // vertex has degree exactly 2 it's a cycle, which is only legal when the
+  // whole puzzle is solved.
+  if (!isSolved(puzzle, solution)) {
+    const visited = new Set();
+    for (let sy = 0; sy <= h; sy++) {
+      for (let sx = 0; sx <= w; sx++) {
+        const startKey = key(sx, sy);
+        if (visited.has(startKey)) continue;
+        visited.add(startKey);
+        if (vertexLoopEdges(sx, sy).length === 0) continue;
+        const compEdges = new Set();
+        const queue = [[sx, sy]];
+        let allDeg2 = true;
+        while (queue.length > 0) {
+          const [vx, vy] = queue.shift();
+          const incident = vertexLoopEdges(vx, vy);
+          if (incident.length !== 2) allDeg2 = false;
+          for (const [a, ex, ey] of incident) {
+            compEdges.add(edgeKey(a, ex, ey));
+            const [nx, ny] = a === 'h'
+              ? [ex === vx ? ex + 1 : ex, ey]
+              : [ex, ey === vy ? ey + 1 : ey];
+            const nKey = key(nx, ny);
+            if (!visited.has(nKey)) {
+              visited.add(nKey);
+              queue.push([nx, ny]);
+            }
+          }
+        }
+        if (allDeg2) for (const e of compEdges) bad.add(e);
+      }
+    }
+  }
+
+  return bad;
 }
 
 function edgeDisplayState(axis, x, y) {
@@ -189,14 +282,15 @@ function renderPuzzle() {
     }
   }
 
+  const badEdges = findBadEdges();
   for (let y = 0; y <= h; y++) {
     for (let x = 0; x < w; x++) {
-      appendEdge(svg, x, y, x + 1, y, edgeDisplayState('h', x, y));
+      appendEdge(svg, x, y, x + 1, y, edgeDisplayState('h', x, y), badEdges.has(edgeKey('h', x, y)));
     }
   }
   for (let y = 0; y < h; y++) {
     for (let x = 0; x <= w; x++) {
-      appendEdge(svg, x, y, x, y + 1, edgeDisplayState('v', x, y));
+      appendEdge(svg, x, y, x, y + 1, edgeDisplayState('v', x, y), badEdges.has(edgeKey('v', x, y)));
     }
   }
 
@@ -253,11 +347,11 @@ function appendCellColor(svg, x, y, color) {
   }));
 }
 
-function appendEdge(svg, x1, y1, x2, y2, display) {
+function appendEdge(svg, x1, y1, x2, y2, display, bad = false) {
   if (display === DISPLAY_LOOP) {
     svg.appendChild(svgEl('line', {
       x1, y1, x2, y2,
-      stroke: LOOP_STROKE,
+      stroke: bad ? BAD_LOOP_STROKE : LOOP_STROKE,
       'stroke-width': LOOP_WIDTH,
       'stroke-linecap': 'round',
     }));
@@ -340,6 +434,50 @@ function cycleColor(current) {
   return CELL_COLOR_CYCLE[(i + 1) % CELL_COLOR_CYCLE.length];
 }
 
+function snapshot() {
+  return { userEdges: new Map(userEdges), cellColors: new Map(cellColors) };
+}
+
+function applySnapshot(s) {
+  userEdges = new Map(s.userEdges);
+  cellColors = new Map(s.cellColors);
+}
+
+function pushUndo() {
+  undoStack.push(snapshot());
+  redoStack.length = 0;
+}
+
+function doUndo() {
+  if (undoStack.length === 0) return;
+  redoStack.push(snapshot());
+  applySnapshot(undoStack.pop());
+  rebuildSolution();
+  render();
+}
+
+function doRedo() {
+  if (redoStack.length === 0) return;
+  undoStack.push(snapshot());
+  applySnapshot(redoStack.pop());
+  rebuildSolution();
+  render();
+}
+
+function doRestart() {
+  if (userEdges.size === 0 && cellColors.size === 0) return;
+  pushUndo();
+  userEdges = new Map();
+  cellColors = new Map();
+  rebuildSolution();
+  render();
+}
+
+function updateActionButtons() {
+  document.querySelector('[data-action="undo"]').disabled = undoStack.length === 0;
+  document.querySelector('[data-action="redo"]').disabled = redoStack.length === 0;
+}
+
 function onClick(ev) {
   if (suppressNextClick) { suppressNextClick = false; return; }
   const t = ev.target;
@@ -348,6 +486,7 @@ function onClick(ev) {
   const x = parseInt(t.dataset.x, 10);
   const y = parseInt(t.dataset.y, 10);
   if (type === 'edge') {
+    pushUndo();
     const axis = t.dataset.axis;
     const next = cycleDisplay(edgeDisplayState(axis, x, y));
     const k = edgeKey(axis, x, y);
@@ -356,6 +495,7 @@ function onClick(ev) {
     else userEdges.set(k, 'X');
     rebuildSolution();
   } else if (type === 'cell') {
+    pushUndo();
     const k = key(x, y);
     const next = cycleColor(cellColors.get(k));
     if (next) cellColors.set(k, next);
@@ -376,6 +516,7 @@ function render() {
   host.replaceChildren(renderPuzzle());
   const solved = isSolved(puzzle, solution);
   setStatus(solved ? 'solved' : 'unsolved', solved ? 'ok' : '');
+  updateActionButtons();
 }
 
 function applyViewBox(svg, vb) {
@@ -569,7 +710,11 @@ function setupMenu() {
     if (menu.hidden) return;
     if (!menu.contains(e.target) && e.target !== btn) setOpen(false);
   });
-  menu.addEventListener('click', () => setOpen(false));
+  menu.addEventListener('click', (e) => {
+    const action = e.target.closest('[data-action]')?.dataset.action;
+    if (action === 'restart') doRestart();
+    setOpen(false);
+  });
 }
 
 async function init() {
@@ -587,6 +732,11 @@ async function init() {
     const host = document.getElementById('puzzle');
     host.style.background = BG_OUTSIDE;
     host.addEventListener('click', onClick);
+    document.getElementById('action-buttons').addEventListener('click', (e) => {
+      const action = e.target.closest('[data-action]')?.dataset.action;
+      if (action === 'undo') doUndo();
+      else if (action === 'redo') doRedo();
+    });
     window.addEventListener('resize', render);
     render();
   } catch (err) {
