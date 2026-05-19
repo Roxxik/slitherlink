@@ -66,11 +66,27 @@ pub fn propagate(puzzle: &Puzzle) -> Solution {
 
 /// Applies forcing rules until fixpoint. Never overwrites an already-set edge,
 /// so a contradicting deduction is silently dropped (caller can detect by re-checking).
+///
+/// Runs local rules first (cell-clue, vertex-degree, no-premature-loop, plus the
+/// one-shot corner / adjacent-threes / diagonal-threes patterns), then a 1-step
+/// trial-elimination pass: for each unset edge, tentatively set Loop *and*
+/// Excluded; whichever side leads to a `find_problems` contradiction is
+/// impossible, so we force the survivor. Repeats until a full pass produces
+/// no changes.
 pub fn propagate_from(puzzle: &Puzzle, sol: &mut Solution) {
     apply_pattern_corners(puzzle, sol);
     apply_pattern_adjacent_threes(puzzle, sol);
     apply_pattern_diagonal_threes(puzzle, sol);
 
+    loop {
+        local_propagate(puzzle, sol);
+        if !apply_lookahead(puzzle, sol) {
+            return;
+        }
+    }
+}
+
+fn local_propagate(puzzle: &Puzzle, sol: &mut Solution) {
     let w = puzzle.width();
     let h = puzzle.height();
     loop {
@@ -96,6 +112,62 @@ pub fn propagate_from(puzzle: &Puzzle, sol: &mut Solution) {
             return;
         }
     }
+}
+
+/// For each unset edge, runs `local_propagate` twice: once with the edge
+/// tentatively Loop and once Excluded. If exactly one of those trials leaves
+/// the board contradiction-free (per `find_problems`), force the survivor.
+///
+/// Returns true if any edge was forced. Caller is expected to re-run local
+/// rules before invoking again.
+fn apply_lookahead(puzzle: &Puzzle, sol: &mut Solution) -> bool {
+    let w = puzzle.width();
+    let h = puzzle.height();
+    let mut edges: Vec<EdgeId> = Vec::new();
+    for y in 0..=h {
+        for x in 0..w {
+            if sol.h_edge(x, y) == EdgeState::Unset {
+                edges.push(EdgeId::H(x, y));
+            }
+        }
+    }
+    for y in 0..h {
+        for x in 0..=w {
+            if sol.v_edge(x, y) == EdgeState::Unset {
+                edges.push(EdgeId::V(x, y));
+            }
+        }
+    }
+
+    let mut changed = false;
+    for e in edges {
+        if get_edge(sol, e) != EdgeState::Unset {
+            continue;
+        }
+        let loop_ok = !trial_contradicts(puzzle, sol, e, EdgeState::Loop);
+        let exc_ok = !trial_contradicts(puzzle, sol, e, EdgeState::Excluded);
+        match (loop_ok, exc_ok) {
+            (false, false) => return changed,
+            (true, false) => {
+                try_set(sol, e, EdgeState::Loop);
+                changed = true;
+            }
+            (false, true) => {
+                try_set(sol, e, EdgeState::Excluded);
+                changed = true;
+            }
+            (true, true) => {}
+        }
+    }
+    changed
+}
+
+fn trial_contradicts(puzzle: &Puzzle, sol: &Solution, e: EdgeId, state: EdgeState) -> bool {
+    let mut trial = sol.clone();
+    try_set(&mut trial, e, state);
+    local_propagate(puzzle, &mut trial);
+    let p = find_problems(puzzle, &trial);
+    !p.bad_cells.is_empty() || !p.bad_vertices.is_empty()
 }
 
 /// Local auto-exclude pass intended for active play: only sets edges to
