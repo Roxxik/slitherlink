@@ -2,15 +2,9 @@ use std::collections::VecDeque;
 
 use crate::cell::Cell;
 use crate::check::is_solved;
-use crate::edge::EdgeState;
+use crate::edge::{EdgeId, EdgeState};
 use crate::puzzle::Puzzle;
 use crate::solution::Solution;
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum EdgeId {
-    H(usize, usize),
-    V(usize, usize),
-}
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Problems {
@@ -139,7 +133,7 @@ fn apply_lookahead(puzzle: &Puzzle, sol: &mut Solution) -> bool {
 
     let mut changed = false;
     for e in edges {
-        if get_edge(sol, e) != EdgeState::Unset {
+        if sol.edge(e) != EdgeState::Unset {
             continue;
         }
         let loop_ok = !trial_contradicts(puzzle, sol, e, EdgeState::Loop);
@@ -319,7 +313,7 @@ fn apply_no_premature_loop(puzzle: &Puzzle, sol: &mut Solution) -> bool {
                 continue;
             }
             let mut tentative = sol.clone();
-            tentative.set_h_edge(x, y, EdgeState::Loop);
+            tentative.set_edge(EdgeId::H(x, y), EdgeState::Loop);
             if !is_solved(puzzle, &tentative) {
                 to_exclude.push(EdgeId::H(x, y));
             }
@@ -334,7 +328,7 @@ fn apply_no_premature_loop(puzzle: &Puzzle, sol: &mut Solution) -> bool {
                 continue;
             }
             let mut tentative = sol.clone();
-            tentative.set_v_edge(x, y, EdgeState::Loop);
+            tentative.set_edge(EdgeId::V(x, y), EdgeState::Loop);
             if !is_solved(puzzle, &tentative) {
                 to_exclude.push(EdgeId::V(x, y));
             }
@@ -439,21 +433,11 @@ fn vertex_edges(x: usize, y: usize, w: usize, h: usize) -> impl Iterator<Item = 
     .flatten()
 }
 
-fn get_edge(sol: &Solution, e: EdgeId) -> EdgeState {
-    match e {
-        EdgeId::H(x, y) => sol.h_edge(x, y),
-        EdgeId::V(x, y) => sol.v_edge(x, y),
-    }
-}
-
 fn try_set(sol: &mut Solution, e: EdgeId, state: EdgeState) -> bool {
-    if get_edge(sol, e) != EdgeState::Unset {
+    if sol.edge(e) != EdgeState::Unset {
         return false;
     }
-    match e {
-        EdgeId::H(x, y) => sol.set_h_edge(x, y, state),
-        EdgeId::V(x, y) => sol.set_v_edge(x, y, state),
-    }
+    sol.set_edge(e, state);
     true
 }
 
@@ -470,7 +454,7 @@ fn force_unset(sol: &mut Solution, edges: impl Iterator<Item = EdgeId>, state: E
 fn count_states(sol: &Solution, edges: impl Iterator<Item = EdgeId>) -> (u8, u8, u8) {
     let (mut loops, mut excluded, mut unset) = (0u8, 0u8, 0u8);
     for e in edges {
-        match get_edge(sol, e) {
+        match sol.edge(e) {
             EdgeState::Loop => loops += 1,
             EdgeState::Excluded => excluded += 1,
             EdgeState::Unset => unset += 1,

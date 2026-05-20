@@ -1,4 +1,4 @@
-use crate::edge::EdgeState;
+use crate::edge::{EdgeId, EdgeState};
 
 /// Edge state for a puzzle of size `width` x `height`.
 ///
@@ -33,22 +33,57 @@ impl Solution {
         self.height
     }
 
+    /// Reads any edge by id. The axis-specific [`h_edge`](Self::h_edge) and
+    /// [`v_edge`](Self::v_edge) helpers below are thin wrappers over this.
+    #[inline]
+    pub fn edge(&self, e: EdgeId) -> EdgeState {
+        match e {
+            EdgeId::H(x, y) => {
+                let i = self.h_index(x, y);
+                self.h_edges[i]
+            }
+            EdgeId::V(x, y) => {
+                let i = self.v_index(x, y);
+                self.v_edges[i]
+            }
+        }
+    }
+
+    /// The single mutation site for edge state. Future bookkeeping (incremental
+    /// loop components, dirty-list tracking) hooks in here so it covers all
+    /// callers automatically.
+    #[inline]
+    pub fn set_edge(&mut self, e: EdgeId, state: EdgeState) {
+        match e {
+            EdgeId::H(x, y) => {
+                let i = self.h_index(x, y);
+                self.h_edges[i] = state;
+            }
+            EdgeId::V(x, y) => {
+                let i = self.v_index(x, y);
+                self.v_edges[i] = state;
+            }
+        }
+    }
+
+    #[inline]
     pub fn h_edge(&self, x: usize, y: usize) -> EdgeState {
-        self.h_edges[self.h_index(x, y)]
+        self.edge(EdgeId::H(x, y))
     }
 
+    #[inline]
     pub fn v_edge(&self, x: usize, y: usize) -> EdgeState {
-        self.v_edges[self.v_index(x, y)]
+        self.edge(EdgeId::V(x, y))
     }
 
+    #[inline]
     pub fn set_h_edge(&mut self, x: usize, y: usize, state: EdgeState) {
-        let i = self.h_index(x, y);
-        self.h_edges[i] = state;
+        self.set_edge(EdgeId::H(x, y), state);
     }
 
+    #[inline]
     pub fn set_v_edge(&mut self, x: usize, y: usize, state: EdgeState) {
-        let i = self.v_index(x, y);
-        self.v_edges[i] = state;
+        self.set_edge(EdgeId::V(x, y), state);
     }
 
     fn h_index(&self, x: usize, y: usize) -> usize {

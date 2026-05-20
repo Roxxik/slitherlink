@@ -10,7 +10,7 @@ mod solution;
 
 pub use cell::Cell;
 pub use check::is_solved;
-pub use edge::EdgeState;
+pub use edge::{EdgeId, EdgeState};
 pub use generate::{
     generate, generate_with, LotteryRow, MetropolisBuilder, MetropolisProposal, ProposalAction,
     RegionAlgo, WalkBuilder,
