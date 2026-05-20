@@ -133,6 +133,14 @@ pub fn is_solved(puzzle: &Puzzle, solution: &Solution) -> bool {
     core::is_solved(&puzzle.inner, &solution.inner)
 }
 
+/// Generates puzzle number `seed` at the given size. The seed selects the region
+/// generator (and seeds it), so each number is a distinct, reproducible puzzle.
+/// `seed` is a `u32` to stay an ordinary JS number rather than a `BigInt`.
+#[wasm_bindgen]
+pub fn generate(width: usize, height: usize, seed: u32) -> Puzzle {
+    Puzzle { inner: core::generate_seeded(width, height, seed as u64) }
+}
+
 #[wasm_bindgen]
 pub fn propagate(puzzle: &Puzzle) -> Solution {
     Solution { inner: core::propagate(&puzzle.inner).into_play() }

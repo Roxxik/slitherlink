@@ -1,4 +1,10 @@
-const PUZZLE_URL = 'puzzles/simple-7x7.txt';
+// --- Generation ---
+const GRID_W = 7;
+const GRID_H = 7;
+
+// --- Persistence (localStorage) ---
+const STORE_CURRENT = 'slitherlink:current';
+const storeKey = (n) => `slitherlink:puzzle:${n}`;
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
@@ -72,6 +78,17 @@ let redoStack = [];
 // Camera state — viewBox `{x, y, w, h}` persisted across renders. `null` = use base from puzzle dims.
 let viewBoxState = null;
 let baseViewBox = null;
+
+// The puzzle currently shown; doubles as the seed. `solved` locks the board.
+let puzzleNumber = 1;
+let solved = false;
+// Timer. `elapsedMs` is solving time banked from finished run segments; while a
+// segment is active `timerStartedAt` holds its Date.now() start. The live total
+// is `elapsedMs + (now - timerStartedAt)`. The interval refreshes the display
+// and flushes progress so a reload resumes near the right time.
+let elapsedMs = 0;
+let timerStartedAt = null;
+let timerInterval = null;
 
 function svgEl(name, attrs = {}) {
   const el = document.createElementNS(SVG_NS, name);
@@ -449,37 +466,45 @@ function pushUndo() {
 }
 
 function doUndo() {
-  if (undoStack.length === 0) return;
+  if (solved || undoStack.length === 0) return;
   redoStack.push(snapshot());
   applySnapshot(undoStack.pop());
   rebuildSolution();
+  saveProgress();
   render();
 }
 
 function doRedo() {
-  if (redoStack.length === 0) return;
+  if (solved || redoStack.length === 0) return;
   undoStack.push(snapshot());
   applySnapshot(redoStack.pop());
   rebuildSolution();
+  saveProgress();
   render();
 }
 
 function doRestart() {
+  if (solved) return;
   if (userEdges.size === 0 && cellColors.size === 0) return;
   pushUndo();
   userEdges = new Map();
   cellColors = new Map();
   rebuildSolution();
+  saveProgress();
   render();
 }
 
 function updateActionButtons() {
-  document.querySelector('[data-action="undo"]').disabled = undoStack.length === 0;
-  document.querySelector('[data-action="redo"]').disabled = redoStack.length === 0;
+  // When solved the board is locked: nothing but zoom/pan and Next stays live.
+  document.querySelector('[data-action="undo"]').disabled = solved || undoStack.length === 0;
+  document.querySelector('[data-action="redo"]').disabled = solved || redoStack.length === 0;
+  const restart = document.querySelector('[data-action="restart"]');
+  if (restart) restart.disabled = solved;
 }
 
 function onClick(ev) {
   if (suppressNextClick) { suppressNextClick = false; return; }
+  if (solved) return;  // board is locked once solved
   const t = ev.target;
   const type = t.dataset?.type;
   if (!type) return;
@@ -500,22 +525,35 @@ function onClick(ev) {
     const next = cycleColor(cellColors.get(k));
     if (next) cellColors.set(k, next);
     else cellColors.delete(k);
+  } else {
+    return;
   }
+  maybeSolve();
+  saveProgress();
   render();
 }
 
-function setStatus(text, kind = '') {
-  const el = document.getElementById('status');
-  el.textContent = text;
-  el.className = kind;
+// Lock the board and freeze the timer the first time the puzzle is solved.
+function maybeSolve() {
+  if (solved) return;
+  const { isSolved } = window.wasmBindings;
+  if (isSolved(puzzle, solution)) {
+    solved = true;
+    pauseTimer();
+  }
 }
 
 function render() {
-  const { isSolved } = window.wasmBindings;
   const host = document.getElementById('puzzle');
   host.replaceChildren(renderPuzzle());
-  const solved = isSolved(puzzle, solution);
-  setStatus(solved ? 'solved' : 'unsolved', solved ? 'ok' : '');
+  host.classList.toggle('solved', solved);
+  document.getElementById('puzzle-num').textContent = `#${puzzleNumber}`;
+  // Timer and Next only appear once solved; the timer then shows the solve time.
+  updateTimerDisplay();
+  const timer = document.getElementById('timer');
+  timer.hidden = !solved;
+  timer.classList.toggle('solved', solved);
+  document.getElementById('next-button').hidden = !solved;
   updateActionButtons();
 }
 
@@ -695,6 +733,138 @@ function setupZoom() {
   }, { passive: false });
 }
 
+// --- Timer ---
+
+function currentElapsed() {
+  return elapsedMs + (timerStartedAt !== null ? Date.now() - timerStartedAt : 0);
+}
+
+function startTimer() {
+  if (solved || timerStartedAt !== null) return;
+  timerStartedAt = Date.now();
+  timerInterval = setInterval(onTick, 500);
+  updateTimerDisplay();
+}
+
+// Bank the active segment and stop ticking. Used both when the tab is hidden
+// (so background time isn't counted) and permanently when the puzzle is solved.
+function pauseTimer() {
+  if (timerStartedAt !== null) {
+    elapsedMs += Date.now() - timerStartedAt;
+    timerStartedAt = null;
+  }
+  if (timerInterval !== null) {
+    clearInterval(timerInterval);
+    timerInterval = null;
+  }
+  updateTimerDisplay();
+}
+
+function onTick() {
+  updateTimerDisplay();
+  saveProgress();
+}
+
+function formatTime(ms) {
+  const total = Math.floor(ms / 1000);
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+function updateTimerDisplay() {
+  const el = document.getElementById('timer');
+  if (el) el.textContent = formatTime(currentElapsed());
+}
+
+// --- Persistence ---
+
+function saveProgress() {
+  const data = {
+    edges: Array.from(userEdges.entries()),
+    colors: Array.from(cellColors.entries()),
+    solved,
+    elapsedMs: currentElapsed(),
+  };
+  try {
+    localStorage.setItem(storeKey(puzzleNumber), JSON.stringify(data));
+    localStorage.setItem(STORE_CURRENT, String(puzzleNumber));
+  } catch (e) {
+    // Storage unavailable or full — play continues, just without persistence.
+    console.warn('could not save progress', e);
+  }
+}
+
+function loadProgress(n) {
+  let raw;
+  try {
+    raw = localStorage.getItem(storeKey(n));
+  } catch (e) {
+    return null;
+  }
+  if (!raw) return null;
+  try {
+    const d = JSON.parse(raw);
+    return {
+      edges: new Map(d.edges || []),
+      colors: new Map(d.colors || []),
+      solved: !!d.solved,
+      elapsedMs: Number(d.elapsedMs) || 0,
+    };
+  } catch (e) {
+    return null;
+  }
+}
+
+// --- Puzzle loading ---
+
+function loadPuzzle(n) {
+  const { generate, isSolved } = window.wasmBindings;
+  pauseTimer();  // stop the previous puzzle's clock before switching
+  let next;
+  try {
+    next = generate(GRID_W, GRID_H, n);
+  } catch (err) {
+    document.getElementById('puzzle').textContent = `Error generating puzzle ${n}: ${err}`;
+    console.error(err);
+    return;
+  }
+  if (puzzle) puzzle.free();
+  puzzle = next;
+  puzzleNumber = n;
+
+  const saved = loadProgress(n);
+  userEdges = saved ? saved.edges : new Map();
+  cellColors = saved ? saved.colors : new Map();
+  elapsedMs = saved ? saved.elapsedMs : 0;
+  timerStartedAt = null;
+  undoStack = [];
+  redoStack = [];
+  viewBoxState = null;  // recenter on the new puzzle
+
+  rebuildSolution();
+  solved = (saved && saved.solved) || isSolved(puzzle, solution);
+
+  saveProgress();
+  render();
+  if (!solved && document.visibilityState !== 'hidden') startTimer();
+}
+
+function nextPuzzle() {
+  loadPuzzle(puzzleNumber + 1);
+}
+
+function choosePuzzle() {
+  const input = window.prompt('Choose puzzle number:', String(puzzleNumber));
+  if (input === null) return;
+  const n = parseInt(input, 10);
+  if (!Number.isInteger(n) || n < 1) {
+    window.alert('Please enter a whole number of at least 1.');
+    return;
+  }
+  loadPuzzle(n);
+}
+
 function setupMenu() {
   const btn = document.getElementById('menu-button');
   const menu = document.getElementById('menu');
@@ -712,37 +882,43 @@ function setupMenu() {
   });
   menu.addEventListener('click', (e) => {
     const action = e.target.closest('[data-action]')?.dataset.action;
-    if (action === 'restart') doRestart();
+    if (action === 'choose') choosePuzzle();
+    else if (action === 'restart') doRestart();
     setOpen(false);
   });
 }
 
-async function init() {
-  const { Puzzle } = window.wasmBindings;
-  try {
-    const response = await fetch(PUZZLE_URL);
-    if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
-    const puzzleStr = await response.text();
-    puzzle = Puzzle.parse(puzzleStr);
-    userEdges = new Map();
-    cellColors = new Map();
-    rebuildSolution();
-    setupMenu();
-    setupZoom();
-    const host = document.getElementById('puzzle');
-    host.style.background = BG_OUTSIDE;
-    host.addEventListener('click', onClick);
-    document.getElementById('action-buttons').addEventListener('click', (e) => {
-      const action = e.target.closest('[data-action]')?.dataset.action;
-      if (action === 'undo') doUndo();
-      else if (action === 'redo') doRedo();
-    });
-    window.addEventListener('resize', render);
-    render();
-  } catch (err) {
-    setStatus(`Error loading ${PUZZLE_URL}: ${err}`, 'bad');
-    console.error(err);
-  }
+function init() {
+  setupMenu();
+  setupZoom();
+  const host = document.getElementById('puzzle');
+  host.style.background = BG_OUTSIDE;
+  host.addEventListener('click', onClick);
+  document.getElementById('action-buttons').addEventListener('click', (e) => {
+    const action = e.target.closest('[data-action]')?.dataset.action;
+    if (action === 'undo') doUndo();
+    else if (action === 'redo') doRedo();
+  });
+  document.getElementById('next-button').addEventListener('click', nextPuzzle);
+  window.addEventListener('resize', render);
+
+  // Don't count time while the tab is in the background; resume when it returns.
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      pauseTimer();
+      saveProgress();
+    } else if (!solved) {
+      startTimer();
+    }
+  });
+  window.addEventListener('pagehide', () => {
+    pauseTimer();
+    saveProgress();
+  });
+
+  let start = parseInt(localStorage.getItem(STORE_CURRENT) || '1', 10);
+  if (!Number.isInteger(start) || start < 1) start = 1;
+  loadPuzzle(start);
 }
 
 if (window.wasmBindings) {

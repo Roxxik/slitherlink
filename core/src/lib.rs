@@ -14,8 +14,8 @@ pub use cell::Cell;
 pub use check::is_solved;
 pub use edge::{EdgeId, EdgeState};
 pub use generate::{
-    generate, generate_with, LotteryRow, MetropolisBuilder, MetropolisProposal, ProposalAction,
-    RegionAlgo, WalkBuilder,
+    generate, generate_seeded, generate_with, LotteryRow, MetropolisBuilder, MetropolisProposal,
+    ProposalAction, RegionAlgo, WalkBuilder,
 };
 pub use lines::{Lines, PlayLines};
 pub use loop_topology::{DsuTopology, LoopTopology};

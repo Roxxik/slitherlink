@@ -27,6 +27,26 @@ pub fn generate(width: usize, height: usize, seed: u64) -> Puzzle {
     generate_with(width, height, seed, RegionAlgo::Walk)
 }
 
+/// Generates an easy-difficulty puzzle, deriving everything from a single `seed`.
+///
+/// One [`Rng`] is seeded once and used first to pick a region generator and then
+/// to drive that generator, so the same seed always yields the same puzzle.
+/// This is the entry point the UI uses to introduce variation across puzzles:
+/// adding a generator (or, later, random parameter choices drawn from the same
+/// `Rng`) only means extending [`pick_algo`], not touching callers.
+pub fn generate_seeded(width: usize, height: usize, seed: u64) -> Puzzle {
+    let mut rng = Rng::new(seed);
+    let algo = pick_algo(&mut rng);
+    generate_with_rng(width, height, &mut rng, algo)
+}
+
+/// Picks a region generator from `rng`. Extend `ALGOS` to add a new generator to
+/// the rotation.
+fn pick_algo(rng: &mut Rng) -> RegionAlgo {
+    const ALGOS: [RegionAlgo; 2] = [RegionAlgo::Walk, RegionAlgo::Metropolis];
+    ALGOS[rng.range(ALGOS.len())]
+}
+
 /// Generates an easy-difficulty puzzle of the requested size, seeded by `seed`,
 /// using the chosen region generator.
 ///
@@ -34,17 +54,21 @@ pub fn generate(width: usize, height: usize, seed: u64) -> Puzzle {
 /// clues are stripped one by one in random order, and a strip is only kept if
 /// propagation still produces a fully-solved board.
 pub fn generate_with(width: usize, height: usize, seed: u64, algo: RegionAlgo) -> Puzzle {
+    let mut rng = Rng::new(seed);
+    generate_with_rng(width, height, &mut rng, algo)
+}
+
+fn generate_with_rng(width: usize, height: usize, rng: &mut Rng, algo: RegionAlgo) -> Puzzle {
     assert!(
         width >= 2 && height >= 2,
         "generate requires at least a 2x2 grid (got {width}x{height})",
     );
-    let mut rng = Rng::new(seed);
     let region = match algo {
-        RegionAlgo::Walk => walk::run(width, height, &mut rng),
-        RegionAlgo::Metropolis => metropolis::run(width, height, &mut rng),
+        RegionAlgo::Walk => walk::run(width, height, rng),
+        RegionAlgo::Metropolis => metropolis::run(width, height, rng),
     };
     let full = clues_from_region(width, height, &region);
-    strip_clues(full, &mut rng)
+    strip_clues(full, rng)
 }
 
 fn strip_clues(mut puzzle: Puzzle, rng: &mut Rng) -> Puzzle {
@@ -139,6 +163,30 @@ mod tests {
         let a = generate(6, 6, 12345);
         let b = generate(6, 6, 12345);
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn generate_seeded_is_deterministic() {
+        // Same seed must reproduce the same puzzle, including the algo pick.
+        let a = generate_seeded(7, 7, 12345);
+        let b = generate_seeded(7, 7, 12345);
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn generate_seeded_uses_both_algos_across_seeds() {
+        // pick_algo should not collapse to a single generator; over a handful of
+        // seeds we expect to draw each variant at least once.
+        let mut saw_walk = false;
+        let mut saw_metropolis = false;
+        for seed in 1..32 {
+            let mut rng = Rng::new(seed);
+            match pick_algo(&mut rng) {
+                RegionAlgo::Walk => saw_walk = true,
+                RegionAlgo::Metropolis => saw_metropolis = true,
+            }
+        }
+        assert!(saw_walk && saw_metropolis, "expected both region generators to be picked");
     }
 
     #[test]
