@@ -375,21 +375,15 @@ fn compute_loop_components(sol: &Solution, w: usize, h: usize) -> Vec<Vec<usize>
     comp
 }
 
-fn loop_neighbors_at(sol: &Solution, x: usize, y: usize, w: usize, h: usize) -> Vec<(usize, usize)> {
-    let mut out = Vec::with_capacity(4);
-    if x > 0 && sol.h_edge(x - 1, y) == EdgeState::Loop {
-        out.push((x - 1, y));
-    }
-    if x < w && sol.h_edge(x, y) == EdgeState::Loop {
-        out.push((x + 1, y));
-    }
-    if y > 0 && sol.v_edge(x, y - 1) == EdgeState::Loop {
-        out.push((x, y - 1));
-    }
-    if y < h && sol.v_edge(x, y) == EdgeState::Loop {
-        out.push((x, y + 1));
-    }
-    out
+fn loop_neighbors_at(sol: &Solution, x: usize, y: usize, w: usize, h: usize) -> impl Iterator<Item = (usize, usize)> {
+    [
+        (x > 0 && sol.h_edge(x - 1, y) == EdgeState::Loop).then(|| (x - 1, y)),
+        (x < w && sol.h_edge(x, y) == EdgeState::Loop).then(|| (x + 1, y)),
+        (y > 0 && sol.v_edge(x, y - 1) == EdgeState::Loop).then(|| (x, y - 1)),
+        (y < h && sol.v_edge(x, y) == EdgeState::Loop).then(|| (x, y + 1)),
+    ]
+    .into_iter()
+    .flatten()
 }
 
 fn apply_cell_clue(puzzle: &Puzzle, sol: &mut Solution, x: usize, y: usize, excludes_only: bool) -> bool {
