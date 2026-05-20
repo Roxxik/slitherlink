@@ -91,6 +91,11 @@ impl<T: LoopTopology> Lines for SolverLines<T> {
             add_edge(&mut self.topo, e, w);
         }
     }
+
+    #[inline]
+    fn is_single_loop(&self) -> bool {
+        self.topo.loop_edge_count() > 0 && self.topo.component_count() == 1
+    }
 }
 
 fn vertex_count(width: usize, height: usize) -> usize {

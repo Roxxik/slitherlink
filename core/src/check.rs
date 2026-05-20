@@ -15,7 +15,7 @@ pub fn is_solved(puzzle: &Puzzle, solution: &impl Lines) -> bool {
     if !vertex_degrees_valid(solution, w, h) {
         return false;
     }
-    is_single_loop(solution, w, h)
+    solution.is_single_loop()
 }
 
 fn clues_satisfied(puzzle: &Puzzle, solution: &impl Lines) -> bool {
@@ -41,18 +41,6 @@ fn vertex_degrees_valid(solution: &impl Lines, w: usize, h: usize) -> bool {
         }
     }
     true
-}
-
-fn is_single_loop(solution: &impl Lines, w: usize, h: usize) -> bool {
-    let total = count_loop_edges(solution);
-    if total == 0 {
-        return false;
-    }
-    let Some(start) = first_vertex_with_loop(solution, w, h) else {
-        return false;
-    };
-    let walked = walk_cycle(solution, start, w, h);
-    walked == total
 }
 
 fn cell_loop_edges(s: &impl Lines, x: usize, y: usize) -> usize {
@@ -91,57 +79,6 @@ fn loop_neighbors(s: &impl Lines, x: usize, y: usize, w: usize, h: usize) -> Vec
         out.push((x, y + 1));
     }
     out
-}
-
-fn count_loop_edges(s: &impl Lines) -> usize {
-    let mut n = 0;
-    for y in 0..=s.height() {
-        for x in 0..s.width() {
-            if s.h_edge(x, y) == EdgeState::Loop {
-                n += 1;
-            }
-        }
-    }
-    for y in 0..s.height() {
-        for x in 0..=s.width() {
-            if s.v_edge(x, y) == EdgeState::Loop {
-                n += 1;
-            }
-        }
-    }
-    n
-}
-
-fn first_vertex_with_loop(s: &impl Lines, w: usize, h: usize) -> Option<(usize, usize)> {
-    for y in 0..=h {
-        for x in 0..=w {
-            if vertex_loop_degree(s, x, y, w, h) > 0 {
-                return Some((x, y));
-            }
-        }
-    }
-    None
-}
-
-/// Walks the cycle starting from `start` until it returns, counting edges.
-/// Assumes every vertex on the cycle has degree exactly 2.
-fn walk_cycle(s: &impl Lines, start: (usize, usize), w: usize, h: usize) -> usize {
-    let mut prev: Option<(usize, usize)> = None;
-    let mut current = start;
-    let mut count = 0;
-    loop {
-        let neighbors = loop_neighbors(s, current.0, current.1, w, h);
-        let next = neighbors.iter().copied().find(|&n| Some(n) != prev);
-        let Some(next) = next else {
-            return count;
-        };
-        prev = Some(current);
-        current = next;
-        count += 1;
-        if current == start {
-            return count;
-        }
-    }
 }
 
 #[cfg(test)]
