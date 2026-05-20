@@ -68,6 +68,7 @@ pub fn propagate_from(puzzle: &Puzzle, sol: &mut SolverLines) {
     apply_pattern_corners(puzzle, sol);
     apply_pattern_adjacent_threes(puzzle, sol);
     apply_pattern_diagonal_threes(puzzle, sol);
+    apply_pattern_zeros(puzzle, sol);
 
     loop {
         local_propagate(puzzle, sol);
@@ -77,30 +78,49 @@ pub fn propagate_from(puzzle: &Puzzle, sol: &mut SolverLines) {
     }
 }
 
+/// Drives the cell-clue and vertex-degree rules to fixpoint off the worklist:
+/// each freshly-set edge (recorded by `SolverLines::set_edge`) is the only thing
+/// that can unlock a new local deduction, so we re-check just the sites incident
+/// to it rather than rescanning the whole grid. Rules that fire set more edges,
+/// which re-enter the worklist, until it drains. `apply_no_premature_loop` is still
+/// a full sweep; any edge it excludes feeds back into the worklist for another round.
 fn local_propagate(puzzle: &Puzzle, sol: &mut SolverLines) {
     let w = puzzle.width();
     let h = puzzle.height();
     loop {
-        let mut changed = false;
-        for y in 0..h {
-            for x in 0..w {
-                if apply_cell_clue(puzzle, sol, x, y, false) {
-                    changed = true;
-                }
-            }
+        while let Some(e) = sol.pop_dirty() {
+            apply_edge_constraints(puzzle, sol, e, w, h);
         }
-        for y in 0..=h {
-            for x in 0..=w {
-                if apply_vertex_degree(sol, x, y, w, h, false) {
-                    changed = true;
-                }
-            }
-        }
-        if apply_no_premature_loop(puzzle, sol) {
-            changed = true;
-        }
-        if !changed {
+        if !apply_no_premature_loop(puzzle, sol) {
             return;
+        }
+    }
+}
+
+/// Re-applies the cell-clue rule to the (at most two) cells and the vertex-degree
+/// rule to the two vertices touching `e`. Edges these rules set are pushed back onto
+/// the worklist by `set_edge`, so the drain loop in `local_propagate` picks them up.
+fn apply_edge_constraints(puzzle: &Puzzle, sol: &mut SolverLines, e: EdgeId, w: usize, h: usize) {
+    match e {
+        EdgeId::H(x, y) => {
+            if y > 0 {
+                apply_cell_clue(puzzle, sol, x, y - 1, false);
+            }
+            if y < h {
+                apply_cell_clue(puzzle, sol, x, y, false);
+            }
+            apply_vertex_degree(sol, x, y, w, h, false);
+            apply_vertex_degree(sol, x + 1, y, w, h, false);
+        }
+        EdgeId::V(x, y) => {
+            if x > 0 {
+                apply_cell_clue(puzzle, sol, x - 1, y, false);
+            }
+            if x < w {
+                apply_cell_clue(puzzle, sol, x, y, false);
+            }
+            apply_vertex_degree(sol, x, y, w, h, false);
+            apply_vertex_degree(sol, x, y + 1, w, h, false);
         }
     }
 }
@@ -194,6 +214,21 @@ pub fn auto_exclude(puzzle: &Puzzle, sol: &mut PlayLines) {
 
 fn is_clue(puzzle: &Puzzle, x: usize, y: usize, value: u8) -> bool {
     matches!(puzzle.cell(x, y), Cell::Clue(n) if n == value)
+}
+
+/// A 0-clue forces all four of its edges Excluded. Runs once as a seed pattern:
+/// it is the only deduction that fires with no edges set, so on an otherwise empty
+/// board nothing else would mark its cell for the worklist-driven `local_propagate`.
+fn apply_pattern_zeros(puzzle: &Puzzle, sol: &mut SolverLines) {
+    let w = puzzle.width();
+    let h = puzzle.height();
+    for y in 0..h {
+        for x in 0..w {
+            if is_clue(puzzle, x, y, 0) {
+                force_unset(sol, cell_edges(x, y).into_iter(), EdgeState::Excluded);
+            }
+        }
+    }
 }
 
 /// 1-in-corner forces the corner pair Excluded; 3-in-corner forces them Loop.
