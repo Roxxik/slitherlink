@@ -4,7 +4,7 @@ mod walk;
 
 use crate::cell::Cell;
 use crate::check::is_solved;
-use crate::propagate::propagate;
+use crate::propagate::{propagate, propagate_easy};
 use crate::puzzle::Puzzle;
 use crate::rng::Rng;
 
@@ -20,10 +20,15 @@ pub enum RegionAlgo {
     Metropolis,
 }
 
-/// Target difficulty for [`generate_seeded`]. The value is currently ignored —
-/// every variant produces the same propagate-solvable "easy" board — but it is
-/// threaded through the API so the UI can offer the choice today and the
-/// generator can branch on it later without changing any caller.
+/// Target difficulty. Selects the solver used to vet the puzzle during
+/// generation: a board is only emitted if that solver can solve it end-to-end,
+/// so the tier bounds how hard the player's deductions have to be.
+///
+/// - [`Easy`](Difficulty::Easy): the limited rule set in [`propagate_easy`] —
+///   clue completion, vertex continuation, soft-exclusion, and no-premature-loop,
+///   with no lookahead. Deliberately beatable by hand.
+/// - [`Hard`](Difficulty::Hard): the full [`propagate`], including the seed
+///   patterns and 1-step lookahead.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Difficulty {
     Easy,
@@ -34,7 +39,7 @@ pub enum Difficulty {
 /// using the [`Walk`](RegionAlgo::Walk) generator. Convenience wrapper around
 /// [`generate_with`].
 pub fn generate(width: usize, height: usize, seed: u64) -> Puzzle {
-    generate_with(width, height, seed, RegionAlgo::Walk)
+    generate_with(width, height, seed, Difficulty::Easy, RegionAlgo::Walk)
 }
 
 /// Generates the puzzle identified by `(width, height, difficulty, number)`.
@@ -49,12 +54,12 @@ pub fn generate(width: usize, height: usize, seed: u64) -> Puzzle {
 ///
 /// Size, difficulty, and level number are folded into the RNG seed, so distinct
 /// categories diverge: easy-7x7-1 and hard-7x7-1 draw different loops. Difficulty
-/// does not yet change the generation *strategy* (e.g. clue-strip aggressiveness)
-/// — add that match where the region/strip work happens below.
+/// additionally selects the generation *strategy* — which solver vets the board —
+/// in [`generate_with_rng`].
 pub fn generate_seeded(width: usize, height: usize, difficulty: Difficulty, number: u64) -> Puzzle {
     let mut rng = Rng::new(seed_from(width, height, difficulty, number));
     let algo = pick_algo(&mut rng);
-    generate_with_rng(width, height, &mut rng, algo)
+    generate_with_rng(width, height, &mut rng, algo, difficulty)
 }
 
 /// Derives a well-distributed RNG seed from a puzzle's category coordinates.
@@ -84,31 +89,79 @@ fn pick_algo(rng: &mut Rng) -> RegionAlgo {
     ALGOS[rng.range(ALGOS.len())]
 }
 
-/// Generates an easy-difficulty puzzle of the requested size, seeded by `seed`,
+/// Generates a puzzle of the requested size and `difficulty`, seeded by `seed`,
 /// using the chosen region generator.
 ///
-/// "Easy" means the resulting puzzle is solvable end-to-end by `propagate` alone:
-/// clues are stripped one by one in random order, and a strip is only kept if
-/// propagation still produces a fully-solved board.
-pub fn generate_with(width: usize, height: usize, seed: u64, algo: RegionAlgo) -> Puzzle {
+/// The resulting puzzle is solvable end-to-end by the tier's solver alone (see
+/// [`Difficulty`]): clues are stripped one by one in random order, and a strip is
+/// only kept if that solver still produces a fully-solved board.
+pub fn generate_with(
+    width: usize,
+    height: usize,
+    seed: u64,
+    difficulty: Difficulty,
+    algo: RegionAlgo,
+) -> Puzzle {
     let mut rng = Rng::new(seed);
-    generate_with_rng(width, height, &mut rng, algo)
+    generate_with_rng(width, height, &mut rng, algo, difficulty)
 }
 
-fn generate_with_rng(width: usize, height: usize, rng: &mut Rng, algo: RegionAlgo) -> Puzzle {
+/// How many fresh regions to try for a fully-clued board the tier's solver can
+/// solve before settling for the last one drawn. The limited Easy rules can leave
+/// even a fully-clued board unsolvable; rather than strip such a board (which would
+/// keep every clue yet still leave the player stuck) we draw another region. This
+/// many attempts makes falling short vanishingly rare; [`generate_with_rng`]
+/// documents the graceful fallback for when it happens anyway.
+const MAX_REGION_ATTEMPTS: usize = 256;
+
+fn generate_with_rng(
+    width: usize,
+    height: usize,
+    rng: &mut Rng,
+    algo: RegionAlgo,
+    difficulty: Difficulty,
+) -> Puzzle {
     assert!(
         width >= 2 && height >= 2,
         "generate requires at least a 2x2 grid (got {width}x{height})",
     );
-    let region = match algo {
-        RegionAlgo::Walk => walk::run(width, height, rng),
-        RegionAlgo::Metropolis => metropolis::run(width, height, rng),
-    };
-    let full = clues_from_region(width, height, &region);
-    strip_clues(full, rng)
+    // Draw regions until the fully-clued board actually solves under the tier's
+    // solver. Checking solvability up front (rather than inferring it from "no clue
+    // could be stripped") is what keeps us from emitting a board the solver merely
+    // got stuck on; stripping then preserves solvability.
+    let mut full = clues_from_region(width, height, &run_region(algo, width, height, rng));
+    let mut attempts = 1;
+    while attempts < MAX_REGION_ATTEMPTS && !tier_solves(&full, difficulty) {
+        full = clues_from_region(width, height, &run_region(algo, width, height, rng));
+        attempts += 1;
+    }
+    // `full` is now tier-solvable, or we exhausted the attempts. Either way
+    // `strip_clues` returns a winnable level: it strips down a solvable board, and
+    // for an unsolvable fallback it can remove nothing and hands back the fully-
+    // clued board as-is. That board always has a solution — a valid region's
+    // boundary is a single closed loop satisfying every clue — and being fully
+    // hinted it is the gentlest board to hand a player, not the hardest. So an
+    // exhausted search degrades to "all clues shown", never to a crash or a
+    // genuinely unsolvable board.
+    strip_clues(full, rng, difficulty)
 }
 
-fn strip_clues(mut puzzle: Puzzle, rng: &mut Rng) -> Puzzle {
+fn run_region(algo: RegionAlgo, width: usize, height: usize, rng: &mut Rng) -> Vec<bool> {
+    match algo {
+        RegionAlgo::Walk => walk::run(width, height, rng),
+        RegionAlgo::Metropolis => metropolis::run(width, height, rng),
+    }
+}
+
+/// True iff `puzzle` is solved end-to-end by the solver for `difficulty`.
+fn tier_solves(puzzle: &Puzzle, difficulty: Difficulty) -> bool {
+    match difficulty {
+        Difficulty::Easy => is_solved(puzzle, &propagate_easy(puzzle)),
+        Difficulty::Hard => is_solved(puzzle, &propagate(puzzle)),
+    }
+}
+
+fn strip_clues(mut puzzle: Puzzle, rng: &mut Rng, difficulty: Difficulty) -> Puzzle {
     let w = puzzle.width();
     let h = puzzle.height();
     let mut positions: Vec<(usize, usize)> = (0..h)
@@ -121,8 +174,7 @@ fn strip_clues(mut puzzle: Puzzle, rng: &mut Rng) -> Puzzle {
             continue;
         }
         puzzle.set_cell(x, y, Cell::Empty);
-        let sol = propagate(&puzzle);
-        if !is_solved(&puzzle, &sol) {
+        if !tier_solves(&puzzle, difficulty) {
             puzzle.set_cell(x, y, saved);
         }
     }
@@ -190,6 +242,22 @@ mod tests {
             assert!(
                 is_solved(&p, &sol),
                 "seed {seed} did not solve via propagation:\n{}",
+                p.overlay(&sol),
+            );
+        }
+    }
+
+    #[test]
+    fn easy_generated_is_solvable_by_easy_solver() {
+        // The tier's contract: an Easy puzzle is beatable with the limited rule set
+        // alone. This also exercises the stuck-board guard — a board the easy solver
+        // only got stuck on (rather than fully solving) must never be emitted.
+        for seed in 1..15 {
+            let p = generate_with(7, 7, seed, Difficulty::Easy, RegionAlgo::Walk);
+            let sol = propagate_easy(&p);
+            assert!(
+                is_solved(&p, &sol),
+                "easy seed {seed} not solvable by the easy solver:\n{}",
                 p.overlay(&sol),
             );
         }

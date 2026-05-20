@@ -35,8 +35,9 @@ impl From<core::EdgeState> for EdgeState {
     }
 }
 
-/// Difficulty tier requested by the UI. Mirrors [`core::Difficulty`]; the value
-/// has no effect on generation yet (both tiers yield the same easy board).
+/// Difficulty tier requested by the UI. Mirrors [`core::Difficulty`]: the tier
+/// selects which solver vets the board, so Easy yields boards beatable with the
+/// limited rule set and Hard ones that need the full propagator.
 #[wasm_bindgen]
 #[derive(Clone, Copy)]
 pub enum Difficulty {

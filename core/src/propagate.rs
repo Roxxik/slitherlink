@@ -55,6 +55,36 @@ pub fn propagate(puzzle: &Puzzle) -> SolverLines {
     sol
 }
 
+/// Runs the deliberately limited "easy" rule set from scratch. See
+/// [`propagate_easy_from`] for the exact rules.
+pub fn propagate_easy(puzzle: &Puzzle) -> SolverLines {
+    let mut sol = SolverLines::empty(puzzle.width(), puzzle.height());
+    propagate_easy_from(puzzle, &mut sol);
+    sol
+}
+
+/// Applies the easy-tier human rules to fixpoint. Models a player who only:
+///   - completes a clue to Loop once its other `4 - n` edges are excluded /
+///     soft-excluded (cell-clue, the `excluded == 4 - n` branch),
+///   - extends the loop through a vertex with one Loop edge and one Unset edge,
+///     the rest excluded / soft-excluded (vertex-degree, the `loops == 1` branch),
+///   - leans on the game's automatic soft-exclusions around satisfied clues and
+///     capped / dead-end vertices, and
+///   - excludes an edge that would close the loop prematurely (no-premature-loop,
+///     answered from the maintained loop topology).
+///
+/// The soft-exclusions are the same ones [`auto_exclude`] hands the player during
+/// play; here they fall out of [`local_propagate`]'s exclude branches. Unlike the
+/// full [`propagate_from`] there is no lookahead and none of the corner /
+/// adjacent-three / diagonal-three seed patterns. The one seed we keep is
+/// [`apply_pattern_zeros`]: `local_propagate` is worklist-driven and does nothing on
+/// a bare board, and a 0-clue excluding its four edges is itself just the soft-
+/// exclude of an already-satisfied clue, which then cascades.
+fn propagate_easy_from(puzzle: &Puzzle, sol: &mut SolverLines) {
+    apply_pattern_zeros(puzzle, sol);
+    local_propagate(puzzle, sol);
+}
+
 /// Applies forcing rules until fixpoint. Never overwrites an already-set edge,
 /// so a contradicting deduction is silently dropped (caller can detect by re-checking).
 ///
@@ -419,6 +449,10 @@ fn cell_edges(x: usize, y: usize) -> [EdgeId; 4] {
     ]
 }
 
+// The `x - 1` / `y - 1` arms must stay lazy: under `then_some` they would be
+// evaluated eagerly and underflow `usize` when x/y is 0. Keep all four uniform
+// (the closures compile away) rather than split the parallel block.
+#[allow(clippy::unnecessary_lazy_evaluations)]
 fn vertex_edges(x: usize, y: usize, w: usize, h: usize) -> impl Iterator<Item = EdgeId> {
     [
         (x > 0).then(|| EdgeId::H(x - 1, y)),

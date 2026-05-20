@@ -21,10 +21,10 @@ pub fn is_solved(puzzle: &Puzzle, solution: &impl Lines) -> bool {
 fn clues_satisfied(puzzle: &Puzzle, solution: &impl Lines) -> bool {
     for y in 0..puzzle.height() {
         for x in 0..puzzle.width() {
-            if let Cell::Clue(n) = puzzle.cell(x, y) {
-                if cell_loop_edges(solution, x, y) != n as usize {
-                    return false;
-                }
+            if let Cell::Clue(n) = puzzle.cell(x, y)
+                && cell_loop_edges(solution, x, y) != n as usize
+            {
+                return false;
             }
         }
     }

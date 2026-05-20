@@ -5,8 +5,8 @@ use std::process::ExitCode;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use slitherlink_core::{
-    generate_seeded, generate_with, is_solved, propagate, Difficulty, LotteryRow, MetropolisBuilder,
-    ProposalAction, Puzzle, RegionAlgo, WalkBuilder,
+    generate_seeded, generate_with, is_solved, propagate, propagate_easy, Difficulty, LotteryRow,
+    MetropolisBuilder, ProposalAction, Puzzle, RegionAlgo, WalkBuilder,
 };
 
 fn main() -> ExitCode {
@@ -19,6 +19,7 @@ fn main() -> ExitCode {
     let mut seed: Option<u64> = None;
     // None means "let the seed pick the generator", matching the UI (generate_seeded).
     let mut algo: Option<RegionAlgo> = None;
+    let mut difficulty = Difficulty::Easy;
     let mut path: Option<String> = None;
     let mut iter = args.iter().skip(1);
     while let Some(arg) = iter.next() {
@@ -51,6 +52,20 @@ fn main() -> ExitCode {
                         return ExitCode::from(2);
                     }
                 });
+            }
+            "--difficulty" => {
+                let Some(v) = iter.next() else {
+                    eprintln!("--difficulty requires a value (easy|hard)");
+                    return ExitCode::from(2);
+                };
+                difficulty = match v.as_str() {
+                    "easy" => Difficulty::Easy,
+                    "hard" => Difficulty::Hard,
+                    other => {
+                        eprintln!("unknown difficulty {other:?} (expected easy|hard)");
+                        return ExitCode::from(2);
+                    }
+                };
             }
             "--seed" => {
                 let Some(v) = iter.next() else {
@@ -100,12 +115,11 @@ fn main() -> ExitCode {
             eprintln!("seed: {chosen}");
             // No --algo: reproduce exactly what the UI shows (seed picks the generator).
             let puzzle = match algo {
-                Some(a) => generate_with(w, h, chosen, a),
-                // Difficulty isn't a CLI flag yet; reproduce the Easy tier.
-                None => generate_seeded(w, h, Difficulty::Easy, chosen),
+                Some(a) => generate_with(w, h, chosen, difficulty, a),
+                None => generate_seeded(w, h, difficulty, chosen),
             };
-            if !is_solved(&puzzle, &propagate(&puzzle)) {
-                eprintln!("seed {chosen} did not produce a propagate-solvable puzzle");
+            if !tier_solved(&puzzle, difficulty) {
+                eprintln!("seed {chosen} did not produce a {difficulty:?}-solvable puzzle");
                 return ExitCode::from(3);
             }
             (puzzle, true)
@@ -120,7 +134,7 @@ fn main() -> ExitCode {
         }
         (None, None) => {
             eprintln!(
-                "usage: {prog} [--propagate] <puzzle-file>\n       {prog} --generate WxH [--seed N] [--algo walk|metropolis] [--propagate]\n       {prog} --show-region WxH [--seed N] [--algo walk|metropolis]"
+                "usage: {prog} [--propagate] <puzzle-file>\n       {prog} --generate WxH [--seed N] [--difficulty easy|hard] [--algo walk|metropolis] [--propagate]\n       {prog} --show-region WxH [--seed N] [--algo walk|metropolis]"
             );
             return ExitCode::from(2);
         }
@@ -140,6 +154,16 @@ fn main() -> ExitCode {
 fn parse_size(spec: &str) -> Option<(usize, usize)> {
     let (w, h) = spec.split_once('x')?;
     Some((w.parse().ok()?, h.parse().ok()?))
+}
+
+/// True iff `puzzle` is solved end-to-end by the solver for `difficulty`. Mirrors
+/// the generator's own acceptance test, so it confirms the emitted board really is
+/// beatable within its tier rather than merely solvable by the strongest solver.
+fn tier_solved(puzzle: &Puzzle, difficulty: Difficulty) -> bool {
+    match difficulty {
+        Difficulty::Easy => is_solved(puzzle, &propagate_easy(puzzle)),
+        Difficulty::Hard => is_solved(puzzle, &propagate(puzzle)),
+    }
 }
 
 fn random_seed() -> u64 {

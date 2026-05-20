@@ -199,7 +199,7 @@ impl WalkBuilder {
             return LotteryRow {
                 label,
                 weight: 0,
-                note: format!("{kind}"),
+                note: kind.to_string(),
                 target: None,
             };
         }
