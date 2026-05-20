@@ -34,10 +34,9 @@ pub fn find_problems(puzzle: &Puzzle, sol: &Solution) -> Problems {
     for y in 0..h {
         for x in 0..w {
             if let Cell::Clue(n) = puzzle.cell(x, y) {
-                let n = n as usize;
                 let edges = cell_edges(x, y);
-                let (loops, excluded, _unset) = split_states(sol, &edges);
-                if loops.len() > n || 4 - excluded.len() < n {
+                let (loops, excluded, _unset) = count_states(sol, edges.into_iter());
+                if loops > n || 4 - excluded < n {
                     out.bad_cells.push((x, y));
                 }
             }
@@ -46,9 +45,8 @@ pub fn find_problems(puzzle: &Puzzle, sol: &Solution) -> Problems {
 
     for y in 0..=h {
         for x in 0..=w {
-            let edges = vertex_edges(x, y, w, h);
-            let (loops, _excluded, unset) = split_states(sol, &edges);
-            if loops.len() >= 3 || (loops.len() == 1 && unset.is_empty()) {
+            let (loops, _excluded, unset) = count_states(sol, vertex_edges(x, y, w, h));
+            if loops >= 3 || (loops == 1 && unset == 0) {
                 out.bad_vertices.push((x, y));
             }
         }
@@ -396,35 +394,33 @@ fn loop_neighbors_at(sol: &Solution, x: usize, y: usize, w: usize, h: usize) -> 
 
 fn apply_cell_clue(puzzle: &Puzzle, sol: &mut Solution, x: usize, y: usize, excludes_only: bool) -> bool {
     let Cell::Clue(n) = puzzle.cell(x, y) else { return false };
-    let n = n as usize;
     let edges = cell_edges(x, y);
-    let (loops, excluded, unset) = split_states(sol, &edges);
-    if unset.is_empty() {
+    let (loops, excluded, unset) = count_states(sol, edges.into_iter());
+    if unset == 0 {
         return false;
     }
-    if loops.len() == n {
-        return force_all(sol, &unset, EdgeState::Excluded);
+    if loops == n {
+        return force_unset(sol, edges.into_iter(), EdgeState::Excluded);
     }
-    if !excludes_only && excluded.len() == 4 - n {
-        return force_all(sol, &unset, EdgeState::Loop);
+    if !excludes_only && excluded == 4 - n {
+        return force_unset(sol, edges.into_iter(), EdgeState::Loop);
     }
     false
 }
 
 fn apply_vertex_degree(sol: &mut Solution, x: usize, y: usize, w: usize, h: usize, excludes_only: bool) -> bool {
-    let edges = vertex_edges(x, y, w, h);
-    let (loops, _excluded, unset) = split_states(sol, &edges);
-    if unset.is_empty() {
+    let (loops, _excluded, unset) = count_states(sol, vertex_edges(x, y, w, h));
+    if unset == 0 {
         return false;
     }
-    if loops.len() >= 2 {
-        return force_all(sol, &unset, EdgeState::Excluded);
+    if loops >= 2 {
+        return force_unset(sol, vertex_edges(x, y, w, h), EdgeState::Excluded);
     }
-    if !excludes_only && loops.len() == 1 && unset.len() == 1 {
-        return force_all(sol, &unset, EdgeState::Loop);
+    if !excludes_only && loops == 1 && unset == 1 {
+        return force_unset(sol, vertex_edges(x, y, w, h), EdgeState::Loop);
     }
-    if loops.is_empty() && unset.len() == 1 {
-        return force_all(sol, &unset, EdgeState::Excluded);
+    if loops == 0 && unset == 1 {
+        return force_unset(sol, vertex_edges(x, y, w, h), EdgeState::Excluded);
     }
     false
 }
@@ -438,21 +434,15 @@ fn cell_edges(x: usize, y: usize) -> [EdgeId; 4] {
     ]
 }
 
-fn vertex_edges(x: usize, y: usize, w: usize, h: usize) -> Vec<EdgeId> {
-    let mut out = Vec::with_capacity(4);
-    if x > 0 {
-        out.push(EdgeId::H(x - 1, y));
-    }
-    if x < w {
-        out.push(EdgeId::H(x, y));
-    }
-    if y > 0 {
-        out.push(EdgeId::V(x, y - 1));
-    }
-    if y < h {
-        out.push(EdgeId::V(x, y));
-    }
-    out
+fn vertex_edges(x: usize, y: usize, w: usize, h: usize) -> impl Iterator<Item = EdgeId> {
+    [
+        (x > 0).then(|| EdgeId::H(x - 1, y)),
+        (x < w).then(|| EdgeId::H(x, y)),
+        (y > 0).then(|| EdgeId::V(x, y - 1)),
+        (y < h).then(|| EdgeId::V(x, y)),
+    ]
+    .into_iter()
+    .flatten()
 }
 
 fn get_edge(sol: &Solution, e: EdgeId) -> EdgeState {
@@ -473,9 +463,9 @@ fn try_set(sol: &mut Solution, e: EdgeId, state: EdgeState) -> bool {
     true
 }
 
-fn force_all(sol: &mut Solution, edges: &[EdgeId], state: EdgeState) -> bool {
+fn force_unset(sol: &mut Solution, edges: impl Iterator<Item = EdgeId>, state: EdgeState) -> bool {
     let mut changed = false;
-    for &e in edges {
+    for e in edges {
         if try_set(sol, e, state) {
             changed = true;
         }
@@ -483,15 +473,13 @@ fn force_all(sol: &mut Solution, edges: &[EdgeId], state: EdgeState) -> bool {
     changed
 }
 
-fn split_states(sol: &Solution, edges: &[EdgeId]) -> (Vec<EdgeId>, Vec<EdgeId>, Vec<EdgeId>) {
-    let mut loops = Vec::new();
-    let mut excluded = Vec::new();
-    let mut unset = Vec::new();
-    for &e in edges {
+fn count_states(sol: &Solution, edges: impl Iterator<Item = EdgeId>) -> (u8, u8, u8) {
+    let (mut loops, mut excluded, mut unset) = (0u8, 0u8, 0u8);
+    for e in edges {
         match get_edge(sol, e) {
-            EdgeState::Loop => loops.push(e),
-            EdgeState::Excluded => excluded.push(e),
-            EdgeState::Unset => unset.push(e),
+            EdgeState::Loop => loops += 1,
+            EdgeState::Excluded => excluded += 1,
+            EdgeState::Unset => unset += 1,
         }
     }
     (loops, excluded, unset)
