@@ -1,4 +1,5 @@
 use slitherlink_core as core;
+use slitherlink_core::Lines as _;
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen(start)]
@@ -89,13 +90,13 @@ impl Puzzle {
 
 #[wasm_bindgen]
 pub struct Solution {
-    inner: core::Solution,
+    inner: core::PlayLines,
 }
 
 #[wasm_bindgen]
 impl Solution {
     pub fn empty(width: usize, height: usize) -> Solution {
-        Self { inner: core::Solution::empty(width, height) }
+        Self { inner: core::PlayLines::empty(width, height) }
     }
 
     pub fn width(&self) -> usize {
@@ -134,7 +135,7 @@ pub fn is_solved(puzzle: &Puzzle, solution: &Solution) -> bool {
 
 #[wasm_bindgen]
 pub fn propagate(puzzle: &Puzzle) -> Solution {
-    Solution { inner: core::propagate(&puzzle.inner) }
+    Solution { inner: core::propagate(&puzzle.inner).into_play() }
 }
 
 #[wasm_bindgen(js_name = "autoExclude")]

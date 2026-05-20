@@ -96,6 +96,7 @@ fn clues_from_region(w: usize, h: usize, inside: &[bool]) -> Puzzle {
 mod tests {
     use super::*;
     use crate::edge::EdgeState;
+    use crate::lines::Lines;
 
     #[test]
     fn clues_for_top_row_region_2x2() {

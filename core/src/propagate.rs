@@ -3,8 +3,9 @@ use std::collections::VecDeque;
 use crate::cell::Cell;
 use crate::check::is_solved;
 use crate::edge::{EdgeId, EdgeState};
+use crate::lines::{Lines, PlayLines};
 use crate::puzzle::Puzzle;
-use crate::solution::Solution;
+use crate::solver_lines::SolverLines;
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Problems {
@@ -20,7 +21,7 @@ pub struct Problems {
 ///
 /// A vertex is bad if it has >= 3 loop edges (impossible degree), or exactly
 /// one loop edge with no remaining unset edges (dead end).
-pub fn find_problems(puzzle: &Puzzle, sol: &Solution) -> Problems {
+pub fn find_problems(puzzle: &Puzzle, sol: &impl Lines) -> Problems {
     let mut out = Problems::default();
     let w = puzzle.width();
     let h = puzzle.height();
@@ -50,8 +51,8 @@ pub fn find_problems(puzzle: &Puzzle, sol: &Solution) -> Problems {
 }
 
 /// Runs constraint propagation from scratch.
-pub fn propagate(puzzle: &Puzzle) -> Solution {
-    let mut sol = Solution::empty(puzzle.width(), puzzle.height());
+pub fn propagate(puzzle: &Puzzle) -> SolverLines {
+    let mut sol = SolverLines::empty(puzzle.width(), puzzle.height());
     propagate_from(puzzle, &mut sol);
     sol
 }
@@ -65,7 +66,7 @@ pub fn propagate(puzzle: &Puzzle) -> Solution {
 /// Excluded; whichever side leads to a `find_problems` contradiction is
 /// impossible, so we force the survivor. Repeats until a full pass produces
 /// no changes.
-pub fn propagate_from(puzzle: &Puzzle, sol: &mut Solution) {
+pub fn propagate_from(puzzle: &Puzzle, sol: &mut SolverLines) {
     apply_pattern_corners(puzzle, sol);
     apply_pattern_adjacent_threes(puzzle, sol);
     apply_pattern_diagonal_threes(puzzle, sol);
@@ -78,7 +79,7 @@ pub fn propagate_from(puzzle: &Puzzle, sol: &mut Solution) {
     }
 }
 
-fn local_propagate(puzzle: &Puzzle, sol: &mut Solution) {
+fn local_propagate(puzzle: &Puzzle, sol: &mut SolverLines) {
     let w = puzzle.width();
     let h = puzzle.height();
     loop {
@@ -112,7 +113,7 @@ fn local_propagate(puzzle: &Puzzle, sol: &mut Solution) {
 ///
 /// Returns true if any edge was forced. Caller is expected to re-run local
 /// rules before invoking again.
-fn apply_lookahead(puzzle: &Puzzle, sol: &mut Solution) -> bool {
+fn apply_lookahead(puzzle: &Puzzle, sol: &mut SolverLines) -> bool {
     let w = puzzle.width();
     let h = puzzle.height();
     let mut edges: Vec<EdgeId> = Vec::new();
@@ -154,7 +155,7 @@ fn apply_lookahead(puzzle: &Puzzle, sol: &mut Solution) -> bool {
     changed
 }
 
-fn trial_contradicts(puzzle: &Puzzle, sol: &Solution, e: EdgeId, state: EdgeState) -> bool {
+fn trial_contradicts(puzzle: &Puzzle, sol: &SolverLines, e: EdgeId, state: EdgeState) -> bool {
     let mut trial = sol.clone();
     try_set(&mut trial, e, state);
     local_propagate(puzzle, &mut trial);
@@ -168,7 +169,7 @@ fn trial_contradicts(puzzle: &Puzzle, sol: &Solution, e: EdgeId, state: EdgeStat
 /// Excludes around clue cells whose loop count is already satisfied, and around
 /// vertices that are either capped at degree 2 or stuck at degree 0 with one
 /// remaining unset edge.
-pub fn auto_exclude(puzzle: &Puzzle, sol: &mut Solution) {
+pub fn auto_exclude(puzzle: &Puzzle, sol: &mut PlayLines) {
     let w = puzzle.width();
     let h = puzzle.height();
     loop {
@@ -198,7 +199,7 @@ fn is_clue(puzzle: &Puzzle, x: usize, y: usize, value: u8) -> bool {
 }
 
 /// 1-in-corner forces the corner pair Excluded; 3-in-corner forces them Loop.
-fn apply_pattern_corners(puzzle: &Puzzle, sol: &mut Solution) {
+fn apply_pattern_corners(puzzle: &Puzzle, sol: &mut SolverLines) {
     let w = puzzle.width();
     let h = puzzle.height();
     if w == 0 || h == 0 {
@@ -227,7 +228,7 @@ fn apply_pattern_corners(puzzle: &Puzzle, sol: &mut Solution) {
 ///
 /// The shared-edge-is-Loop deduction technically allows a degenerate case where the
 /// 2-cell loop *is* the entire puzzle solution, but that never arises in real puzzles.
-fn apply_pattern_adjacent_threes(puzzle: &Puzzle, sol: &mut Solution) {
+fn apply_pattern_adjacent_threes(puzzle: &Puzzle, sol: &mut SolverLines) {
     let w = puzzle.width();
     let h = puzzle.height();
     for y in 0..h {
@@ -264,7 +265,7 @@ fn apply_pattern_adjacent_threes(puzzle: &Puzzle, sol: &mut Solution) {
 
 /// Two diagonally adjacent 3-clues force both "outer" edges of each cell
 /// (the two edges on the opposite corner from the diagonal) to Loop.
-fn apply_pattern_diagonal_threes(puzzle: &Puzzle, sol: &mut Solution) {
+fn apply_pattern_diagonal_threes(puzzle: &Puzzle, sol: &mut SolverLines) {
     let w = puzzle.width();
     let h = puzzle.height();
     for y in 0..h {
@@ -298,7 +299,7 @@ fn apply_pattern_diagonal_threes(puzzle: &Puzzle, sol: &mut Solution) {
 
 /// Excludes any unset edge whose two endpoints are already connected via Loop edges,
 /// unless setting the edge to Loop would complete the puzzle (`is_solved` returns true).
-fn apply_no_premature_loop(puzzle: &Puzzle, sol: &mut Solution) -> bool {
+fn apply_no_premature_loop(puzzle: &Puzzle, sol: &mut SolverLines) -> bool {
     let w = puzzle.width();
     let h = puzzle.height();
     let comp = compute_loop_components(sol, w, h);
@@ -344,7 +345,7 @@ fn apply_no_premature_loop(puzzle: &Puzzle, sol: &mut Solution) -> bool {
     changed
 }
 
-fn compute_loop_components(sol: &Solution, w: usize, h: usize) -> Vec<Vec<usize>> {
+fn compute_loop_components(sol: &impl Lines, w: usize, h: usize) -> Vec<Vec<usize>> {
     let mut comp = vec![vec![usize::MAX; w + 1]; h + 1];
     let mut next_id = 0;
     for sy in 0..=h {
@@ -369,7 +370,7 @@ fn compute_loop_components(sol: &Solution, w: usize, h: usize) -> Vec<Vec<usize>
     comp
 }
 
-fn loop_neighbors_at(sol: &Solution, x: usize, y: usize, w: usize, h: usize) -> impl Iterator<Item = (usize, usize)> {
+fn loop_neighbors_at(sol: &impl Lines, x: usize, y: usize, w: usize, h: usize) -> impl Iterator<Item = (usize, usize)> {
     [
         (x > 0 && sol.h_edge(x - 1, y) == EdgeState::Loop).then(|| (x - 1, y)),
         (x < w && sol.h_edge(x, y) == EdgeState::Loop).then(|| (x + 1, y)),
@@ -380,7 +381,7 @@ fn loop_neighbors_at(sol: &Solution, x: usize, y: usize, w: usize, h: usize) -> 
     .flatten()
 }
 
-fn apply_cell_clue(puzzle: &Puzzle, sol: &mut Solution, x: usize, y: usize, excludes_only: bool) -> bool {
+fn apply_cell_clue(puzzle: &Puzzle, sol: &mut impl Lines, x: usize, y: usize, excludes_only: bool) -> bool {
     let Cell::Clue(n) = puzzle.cell(x, y) else { return false };
     let edges = cell_edges(x, y);
     let (loops, excluded, unset) = count_states(sol, edges.into_iter());
@@ -396,7 +397,7 @@ fn apply_cell_clue(puzzle: &Puzzle, sol: &mut Solution, x: usize, y: usize, excl
     false
 }
 
-fn apply_vertex_degree(sol: &mut Solution, x: usize, y: usize, w: usize, h: usize, excludes_only: bool) -> bool {
+fn apply_vertex_degree(sol: &mut impl Lines, x: usize, y: usize, w: usize, h: usize, excludes_only: bool) -> bool {
     let (loops, _excluded, unset) = count_states(sol, vertex_edges(x, y, w, h));
     if unset == 0 {
         return false;
@@ -433,7 +434,7 @@ fn vertex_edges(x: usize, y: usize, w: usize, h: usize) -> impl Iterator<Item = 
     .flatten()
 }
 
-fn try_set(sol: &mut Solution, e: EdgeId, state: EdgeState) -> bool {
+fn try_set(sol: &mut impl Lines, e: EdgeId, state: EdgeState) -> bool {
     if sol.edge(e) != EdgeState::Unset {
         return false;
     }
@@ -441,7 +442,7 @@ fn try_set(sol: &mut Solution, e: EdgeId, state: EdgeState) -> bool {
     true
 }
 
-fn force_unset(sol: &mut Solution, edges: impl Iterator<Item = EdgeId>, state: EdgeState) -> bool {
+fn force_unset(sol: &mut impl Lines, edges: impl Iterator<Item = EdgeId>, state: EdgeState) -> bool {
     let mut changed = false;
     for e in edges {
         if try_set(sol, e, state) {
@@ -451,7 +452,7 @@ fn force_unset(sol: &mut Solution, edges: impl Iterator<Item = EdgeId>, state: E
     changed
 }
 
-fn count_states(sol: &Solution, edges: impl Iterator<Item = EdgeId>) -> (u8, u8, u8) {
+fn count_states(sol: &impl Lines, edges: impl Iterator<Item = EdgeId>) -> (u8, u8, u8) {
     let (mut loops, mut excluded, mut unset) = (0u8, 0u8, 0u8);
     for e in edges {
         match sol.edge(e) {
@@ -468,7 +469,7 @@ mod tests {
     use super::*;
     use crate::cell::Cell::{Clue, Empty};
 
-    fn count_loop(sol: &Solution) -> usize {
+    fn count_loop(sol: &impl Lines) -> usize {
         let mut n = 0;
         for y in 0..=sol.height() {
             for x in 0..sol.width() {
@@ -487,7 +488,7 @@ mod tests {
         n
     }
 
-    fn count_excluded(sol: &Solution) -> usize {
+    fn count_excluded(sol: &impl Lines) -> usize {
         let mut n = 0;
         for y in 0..=sol.height() {
             for x in 0..sol.width() {
@@ -567,7 +568,7 @@ mod tests {
         // 2x2 empty puzzle. Manually create an L=1, U=0 configuration at vertex (1, 0)
         // by marking one incident edge Loop and the rest Excluded.
         let p = Puzzle::new(2, 2, vec![Empty; 4]);
-        let mut s = Solution::empty(2, 2);
+        let mut s = PlayLines::empty(2, 2);
         s.set_h_edge(0, 0, EdgeState::Loop);
         s.set_h_edge(1, 0, EdgeState::Excluded);
         s.set_v_edge(1, 0, EdgeState::Excluded);
@@ -589,7 +590,7 @@ mod tests {
         // 2x2 with a clue-3 cell where we manually exclude two of its edges.
         // Now max possible loop count = 4 - 2 = 2 < 3 -> bad cell.
         let p = Puzzle::new(2, 2, vec![Clue(3), Empty, Empty, Empty]);
-        let mut s = Solution::empty(2, 2);
+        let mut s = PlayLines::empty(2, 2);
         s.set_h_edge(0, 0, EdgeState::Excluded);
         s.set_v_edge(0, 0, EdgeState::Excluded);
         let problems = find_problems(&p, &s);
@@ -673,7 +674,7 @@ mod tests {
         // Closing v(1,0) would form a tiny loop around (0,0) but never satisfy
         // the clue at (2,0), so v(1,0) must be Excluded.
         let p = Puzzle::new(3, 1, vec![Empty, Empty, Clue(1)]);
-        let mut s = Solution::empty(3, 1);
+        let mut s = SolverLines::empty(3, 1);
         s.set_h_edge(0, 0, EdgeState::Loop);
         s.set_h_edge(0, 1, EdgeState::Loop);
         s.set_v_edge(0, 0, EdgeState::Loop);
@@ -686,7 +687,7 @@ mod tests {
         // 1x1 empty puzzle: three border edges of the only cell already Loop.
         // The fourth completes the unique solution; the rule must not exclude it.
         let p = Puzzle::new(1, 1, vec![Empty]);
-        let mut s = Solution::empty(1, 1);
+        let mut s = SolverLines::empty(1, 1);
         s.set_h_edge(0, 0, EdgeState::Loop);
         s.set_h_edge(0, 1, EdgeState::Loop);
         s.set_v_edge(0, 0, EdgeState::Loop);
@@ -701,7 +702,7 @@ mod tests {
         // 2x2 with no clues, but manually mark 2 adjacent loop edges at vertex (1, 0).
         // Vertex (1, 0) now has loop>=2 -> remaining unset edges at (1, 0) get Excluded.
         let p = Puzzle::new(2, 2, vec![Empty; 4]);
-        let mut s = Solution::empty(2, 2);
+        let mut s = SolverLines::empty(2, 2);
         s.set_h_edge(0, 0, EdgeState::Loop);
         s.set_h_edge(1, 0, EdgeState::Loop);
         propagate_from(&p, &mut s);
@@ -714,7 +715,7 @@ mod tests {
         // the clue. auto_exclude must X the remaining three edges around (0, 0)
         // but must not draw any new Loop edges anywhere.
         let p = Puzzle::new(2, 2, vec![Clue(1), Empty, Empty, Empty]);
-        let mut s = Solution::empty(2, 2);
+        let mut s = PlayLines::empty(2, 2);
         s.set_h_edge(0, 0, EdgeState::Loop);
         let loops_before = count_loop(&s);
         auto_exclude(&p, &mut s);
@@ -729,7 +730,7 @@ mod tests {
         // 2x2 with a 3-clue at (0, 0). Two of its edges are already Excluded;
         // propagate would force the remaining two to Loop. auto_exclude must not.
         let p = Puzzle::new(2, 2, vec![Clue(3), Empty, Empty, Empty]);
-        let mut s = Solution::empty(2, 2);
+        let mut s = PlayLines::empty(2, 2);
         s.set_h_edge(0, 1, EdgeState::Excluded);
         s.set_v_edge(1, 0, EdgeState::Excluded);
         auto_exclude(&p, &mut s);
@@ -742,7 +743,7 @@ mod tests {
         // 2x2 with no clues. Mark three of vertex (1, 0)'s edges as Excluded.
         // The remaining h(0, 0) cannot be Loop (would leave degree 1), so X it.
         let p = Puzzle::new(2, 2, vec![Empty; 4]);
-        let mut s = Solution::empty(2, 2);
+        let mut s = PlayLines::empty(2, 2);
         s.set_h_edge(1, 0, EdgeState::Excluded);
         s.set_v_edge(1, 0, EdgeState::Excluded);
         auto_exclude(&p, &mut s);
@@ -755,7 +756,7 @@ mod tests {
         // force the only remaining unset edge to Loop to satisfy degree 2.
         // auto_exclude must leave it Unset.
         let p = Puzzle::new(2, 2, vec![Empty; 4]);
-        let mut s = Solution::empty(2, 2);
+        let mut s = PlayLines::empty(2, 2);
         s.set_h_edge(0, 0, EdgeState::Loop);
         s.set_h_edge(1, 0, EdgeState::Excluded);
         auto_exclude(&p, &mut s);

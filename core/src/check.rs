@@ -1,9 +1,9 @@
 use crate::cell::Cell;
 use crate::edge::EdgeState;
+use crate::lines::Lines;
 use crate::puzzle::Puzzle;
-use crate::solution::Solution;
 
-pub fn is_solved(puzzle: &Puzzle, solution: &Solution) -> bool {
+pub fn is_solved(puzzle: &Puzzle, solution: &impl Lines) -> bool {
     assert_eq!(puzzle.width(), solution.width());
     assert_eq!(puzzle.height(), solution.height());
     let w = puzzle.width();
@@ -18,7 +18,7 @@ pub fn is_solved(puzzle: &Puzzle, solution: &Solution) -> bool {
     is_single_loop(solution, w, h)
 }
 
-fn clues_satisfied(puzzle: &Puzzle, solution: &Solution) -> bool {
+fn clues_satisfied(puzzle: &Puzzle, solution: &impl Lines) -> bool {
     for y in 0..puzzle.height() {
         for x in 0..puzzle.width() {
             if let Cell::Clue(n) = puzzle.cell(x, y) {
@@ -31,7 +31,7 @@ fn clues_satisfied(puzzle: &Puzzle, solution: &Solution) -> bool {
     true
 }
 
-fn vertex_degrees_valid(solution: &Solution, w: usize, h: usize) -> bool {
+fn vertex_degrees_valid(solution: &impl Lines, w: usize, h: usize) -> bool {
     for y in 0..=h {
         for x in 0..=w {
             let d = vertex_loop_degree(solution, x, y, w, h);
@@ -43,7 +43,7 @@ fn vertex_degrees_valid(solution: &Solution, w: usize, h: usize) -> bool {
     true
 }
 
-fn is_single_loop(solution: &Solution, w: usize, h: usize) -> bool {
+fn is_single_loop(solution: &impl Lines, w: usize, h: usize) -> bool {
     let total = count_loop_edges(solution);
     if total == 0 {
         return false;
@@ -55,7 +55,7 @@ fn is_single_loop(solution: &Solution, w: usize, h: usize) -> bool {
     walked == total
 }
 
-fn cell_loop_edges(s: &Solution, x: usize, y: usize) -> usize {
+fn cell_loop_edges(s: &impl Lines, x: usize, y: usize) -> usize {
     let mut n = 0;
     if s.h_edge(x, y) == EdgeState::Loop {
         n += 1;
@@ -72,11 +72,11 @@ fn cell_loop_edges(s: &Solution, x: usize, y: usize) -> usize {
     n
 }
 
-fn vertex_loop_degree(s: &Solution, x: usize, y: usize, w: usize, h: usize) -> usize {
+fn vertex_loop_degree(s: &impl Lines, x: usize, y: usize, w: usize, h: usize) -> usize {
     loop_neighbors(s, x, y, w, h).len()
 }
 
-fn loop_neighbors(s: &Solution, x: usize, y: usize, w: usize, h: usize) -> Vec<(usize, usize)> {
+fn loop_neighbors(s: &impl Lines, x: usize, y: usize, w: usize, h: usize) -> Vec<(usize, usize)> {
     let mut out = Vec::with_capacity(2);
     if x > 0 && s.h_edge(x - 1, y) == EdgeState::Loop {
         out.push((x - 1, y));
@@ -93,7 +93,7 @@ fn loop_neighbors(s: &Solution, x: usize, y: usize, w: usize, h: usize) -> Vec<(
     out
 }
 
-fn count_loop_edges(s: &Solution) -> usize {
+fn count_loop_edges(s: &impl Lines) -> usize {
     let mut n = 0;
     for y in 0..=s.height() {
         for x in 0..s.width() {
@@ -112,7 +112,7 @@ fn count_loop_edges(s: &Solution) -> usize {
     n
 }
 
-fn first_vertex_with_loop(s: &Solution, w: usize, h: usize) -> Option<(usize, usize)> {
+fn first_vertex_with_loop(s: &impl Lines, w: usize, h: usize) -> Option<(usize, usize)> {
     for y in 0..=h {
         for x in 0..=w {
             if vertex_loop_degree(s, x, y, w, h) > 0 {
@@ -125,7 +125,7 @@ fn first_vertex_with_loop(s: &Solution, w: usize, h: usize) -> Option<(usize, us
 
 /// Walks the cycle starting from `start` until it returns, counting edges.
 /// Assumes every vertex on the cycle has degree exactly 2.
-fn walk_cycle(s: &Solution, start: (usize, usize), w: usize, h: usize) -> usize {
+fn walk_cycle(s: &impl Lines, start: (usize, usize), w: usize, h: usize) -> usize {
     let mut prev: Option<(usize, usize)> = None;
     let mut current = start;
     let mut count = 0;
@@ -148,21 +148,22 @@ fn walk_cycle(s: &Solution, start: (usize, usize), w: usize, h: usize) -> usize 
 mod tests {
     use super::*;
     use crate::cell::Cell::{Clue, Empty};
+    use crate::lines::PlayLines;
 
-    fn set_loop_h(s: &mut Solution, edges: &[(usize, usize)]) {
+    fn set_loop_h(s: &mut PlayLines, edges: &[(usize, usize)]) {
         for &(x, y) in edges {
             s.set_h_edge(x, y, EdgeState::Loop);
         }
     }
 
-    fn set_loop_v(s: &mut Solution, edges: &[(usize, usize)]) {
+    fn set_loop_v(s: &mut PlayLines, edges: &[(usize, usize)]) {
         for &(x, y) in edges {
             s.set_v_edge(x, y, EdgeState::Loop);
         }
     }
 
-    fn border_2x2_loop() -> Solution {
-        let mut s = Solution::empty(2, 2);
+    fn border_2x2_loop() -> PlayLines {
+        let mut s = PlayLines::empty(2, 2);
         set_loop_h(&mut s, &[(0, 0), (1, 0), (0, 2), (1, 2)]);
         set_loop_v(&mut s, &[(0, 0), (0, 1), (2, 0), (2, 1)]);
         s
@@ -177,7 +178,7 @@ mod tests {
     #[test]
     fn solves_1x1_loop_around_empty_cell() {
         let p = Puzzle::new(1, 1, vec![Empty]);
-        let mut s = Solution::empty(1, 1);
+        let mut s = PlayLines::empty(1, 1);
         set_loop_h(&mut s, &[(0, 0), (0, 1)]);
         set_loop_v(&mut s, &[(0, 0), (1, 0)]);
         assert!(is_solved(&p, &s));
@@ -186,7 +187,7 @@ mod tests {
     #[test]
     fn rejects_empty_solution() {
         let p = Puzzle::new(2, 2, vec![Clue(2); 4]);
-        assert!(!is_solved(&p, &Solution::empty(2, 2)));
+        assert!(!is_solved(&p, &PlayLines::empty(2, 2)));
     }
 
     #[test]
@@ -198,7 +199,7 @@ mod tests {
     #[test]
     fn rejects_open_path() {
         let p = Puzzle::new(2, 2, vec![Clue(2); 4]);
-        let mut s = Solution::empty(2, 2);
+        let mut s = PlayLines::empty(2, 2);
         set_loop_h(&mut s, &[(0, 0), (1, 0)]);
         set_loop_v(&mut s, &[(2, 0)]);
         assert!(!is_solved(&p, &s));
@@ -215,7 +216,7 @@ mod tests {
     #[test]
     fn rejects_two_separate_loops() {
         let p: Puzzle = "4x1\na11a".parse().unwrap();
-        let mut s = Solution::empty(4, 1);
+        let mut s = PlayLines::empty(4, 1);
         set_loop_h(&mut s, &[(0, 0), (0, 1), (3, 0), (3, 1)]);
         set_loop_v(&mut s, &[(0, 0), (1, 0), (3, 0), (4, 0)]);
         assert!(!is_solved(&p, &s));

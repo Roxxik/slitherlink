@@ -2,7 +2,7 @@ use std::fmt;
 
 use crate::cell::Cell;
 use crate::edge::EdgeState;
-use crate::solution::Solution;
+use crate::lines::Lines;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Puzzle {
@@ -49,7 +49,7 @@ impl Puzzle {
 
     /// Renders this puzzle with `solution` overlaid as ASCII. Loop edges are drawn
     /// solid (`---` / `|`), Excluded edges as `x`, Unset edges as blank.
-    pub fn overlay(&self, solution: &Solution) -> String {
+    pub fn overlay(&self, solution: &impl Lines) -> String {
         assert_eq!(self.width, solution.width());
         assert_eq!(self.height, solution.height());
         let mut out = String::new();
@@ -61,7 +61,7 @@ impl Puzzle {
         out
     }
 
-    fn append_corner_row(&self, out: &mut String, solution: &Solution, y: usize) {
+    fn append_corner_row(&self, out: &mut String, solution: &impl Lines, y: usize) {
         out.push('.');
         for x in 0..self.width {
             let s = match solution.h_edge(x, y) {
@@ -75,7 +75,7 @@ impl Puzzle {
         out.push('\n');
     }
 
-    fn append_cell_row(&self, out: &mut String, solution: &Solution, y: usize) {
+    fn append_cell_row(&self, out: &mut String, solution: &impl Lines, y: usize) {
         for x in 0..self.width {
             let v = match solution.v_edge(x, y) {
                 EdgeState::Loop => '|',
