@@ -5,8 +5,8 @@ use std::process::ExitCode;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use slitherlink_core::{
-    generate_with, is_solved, propagate, LotteryRow, MetropolisBuilder, ProposalAction, Puzzle,
-    RegionAlgo, WalkBuilder,
+    generate_seeded, generate_with, is_solved, propagate, LotteryRow, MetropolisBuilder,
+    ProposalAction, Puzzle, RegionAlgo, WalkBuilder,
 };
 
 fn main() -> ExitCode {
@@ -17,7 +17,8 @@ fn main() -> ExitCode {
     let mut generate_spec: Option<String> = None;
     let mut show_region_spec: Option<String> = None;
     let mut seed: Option<u64> = None;
-    let mut algo: RegionAlgo = RegionAlgo::Walk;
+    // None means "let the seed pick the generator", matching the UI (generate_seeded).
+    let mut algo: Option<RegionAlgo> = None;
     let mut path: Option<String> = None;
     let mut iter = args.iter().skip(1);
     while let Some(arg) = iter.next() {
@@ -42,14 +43,14 @@ fn main() -> ExitCode {
                     eprintln!("--algo requires a value (walk|metropolis)");
                     return ExitCode::from(2);
                 };
-                algo = match v.as_str() {
+                algo = Some(match v.as_str() {
                     "walk" => RegionAlgo::Walk,
                     "metropolis" => RegionAlgo::Metropolis,
                     other => {
                         eprintln!("unknown algo {other:?} (expected walk|metropolis)");
                         return ExitCode::from(2);
                     }
-                };
+                });
             }
             "--seed" => {
                 let Some(v) = iter.next() else {
@@ -83,7 +84,7 @@ fn main() -> ExitCode {
         };
         let chosen = seed.unwrap_or_else(random_seed);
         eprintln!("seed: {chosen}");
-        return match algo {
+        return match algo.unwrap_or(RegionAlgo::Walk) {
             RegionAlgo::Walk => show_walk(w, h, chosen),
             RegionAlgo::Metropolis => show_metropolis(w, h, chosen),
         };
@@ -97,7 +98,11 @@ fn main() -> ExitCode {
             };
             let chosen = seed.unwrap_or_else(random_seed);
             eprintln!("seed: {chosen}");
-            let puzzle = generate_with(w, h, chosen, algo);
+            // No --algo: reproduce exactly what the UI shows (seed picks the generator).
+            let puzzle = match algo {
+                Some(a) => generate_with(w, h, chosen, a),
+                None => generate_seeded(w, h, chosen),
+            };
             if !is_solved(&puzzle, &propagate(&puzzle)) {
                 eprintln!("seed {chosen} did not produce a propagate-solvable puzzle");
                 return ExitCode::from(3);
