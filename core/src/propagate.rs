@@ -1,5 +1,3 @@
-use std::collections::VecDeque;
-
 use crate::cell::Cell;
 use crate::check::is_solved;
 use crate::edge::{EdgeId, EdgeState};
@@ -302,7 +300,6 @@ fn apply_pattern_diagonal_threes(puzzle: &Puzzle, sol: &mut SolverLines) {
 fn apply_no_premature_loop(puzzle: &Puzzle, sol: &mut SolverLines) -> bool {
     let w = puzzle.width();
     let h = puzzle.height();
-    let comp = compute_loop_components(sol, w, h);
 
     let mut to_exclude: Vec<EdgeId> = Vec::new();
     for y in 0..=h {
@@ -310,7 +307,7 @@ fn apply_no_premature_loop(puzzle: &Puzzle, sol: &mut SolverLines) -> bool {
             if sol.h_edge(x, y) != EdgeState::Unset {
                 continue;
             }
-            if comp[y][x] != comp[y][x + 1] {
+            if !sol.loop_connected((x, y), (x + 1, y)) {
                 continue;
             }
             let mut tentative = sol.clone();
@@ -325,7 +322,7 @@ fn apply_no_premature_loop(puzzle: &Puzzle, sol: &mut SolverLines) -> bool {
             if sol.v_edge(x, y) != EdgeState::Unset {
                 continue;
             }
-            if comp[y][x] != comp[y + 1][x] {
+            if !sol.loop_connected((x, y), (x, y + 1)) {
                 continue;
             }
             let mut tentative = sol.clone();
@@ -343,42 +340,6 @@ fn apply_no_premature_loop(puzzle: &Puzzle, sol: &mut SolverLines) -> bool {
         }
     }
     changed
-}
-
-fn compute_loop_components(sol: &impl Lines, w: usize, h: usize) -> Vec<Vec<usize>> {
-    let mut comp = vec![vec![usize::MAX; w + 1]; h + 1];
-    let mut next_id = 0;
-    for sy in 0..=h {
-        for sx in 0..=w {
-            if comp[sy][sx] != usize::MAX {
-                continue;
-            }
-            comp[sy][sx] = next_id;
-            let mut queue = VecDeque::new();
-            queue.push_back((sx, sy));
-            while let Some((x, y)) = queue.pop_front() {
-                for (nx, ny) in loop_neighbors_at(sol, x, y, w, h) {
-                    if comp[ny][nx] == usize::MAX {
-                        comp[ny][nx] = next_id;
-                        queue.push_back((nx, ny));
-                    }
-                }
-            }
-            next_id += 1;
-        }
-    }
-    comp
-}
-
-fn loop_neighbors_at(sol: &impl Lines, x: usize, y: usize, w: usize, h: usize) -> impl Iterator<Item = (usize, usize)> {
-    [
-        (x > 0 && sol.h_edge(x - 1, y) == EdgeState::Loop).then(|| (x - 1, y)),
-        (x < w && sol.h_edge(x, y) == EdgeState::Loop).then(|| (x + 1, y)),
-        (y > 0 && sol.v_edge(x, y - 1) == EdgeState::Loop).then(|| (x, y - 1)),
-        (y < h && sol.v_edge(x, y) == EdgeState::Loop).then(|| (x, y + 1)),
-    ]
-    .into_iter()
-    .flatten()
 }
 
 fn apply_cell_clue(puzzle: &Puzzle, sol: &mut impl Lines, x: usize, y: usize, excludes_only: bool) -> bool {
