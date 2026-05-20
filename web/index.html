@@ -32,12 +32,24 @@
       padding: 0 0.75rem;
       z-index: 10;
     }
-    #title { font-weight: 600; font-size: 1rem; }
+    #home-button {
+      background: none;
+      border: none;
+      padding: 0.4rem;
+      cursor: pointer;
+      color: #222;
+      display: flex;
+      align-items: center;
+      border-radius: 4px;
+    }
+    #home-button:hover { background: #f0f0f0; }
     #puzzle-num {
-      font-family: ui-monospace, monospace;
       font-size: 0.9rem;
       color: #555;
       margin-right: auto;   /* pushes the solved-state controls to the right */
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
     #timer {
       font-family: ui-monospace, monospace;
@@ -156,11 +168,137 @@
     }
     #action-buttons button:hover { background: #f1f1f1; }
     #action-buttons button:disabled { color: #bbb; cursor: not-allowed; }
+
+    /* --- View toggle (these have explicit display, so beat the [hidden] UA rule) --- */
+    #topbar[hidden], #puzzle[hidden], #action-buttons[hidden], #home[hidden] { display: none; }
+
+    /* --- Home / start screen --- */
+    #home {
+      position: fixed;
+      inset: 0;
+      overflow-y: auto;
+      background: #fafafa;
+      display: flex;
+      justify-content: center;
+      z-index: 20;
+    }
+    .home-inner { width: 100%; max-width: 28rem; padding: 1.5rem 1.25rem 3rem; }
+    .home-title { font-size: 1.6rem; font-weight: 600; margin: 0.5rem 0 1.5rem; }
+    .home-section { margin-bottom: 1.5rem; }
+    .home-label {
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #888;
+      margin-bottom: 0.5rem;
+    }
+    .pill-row { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+    .pill {
+      border: 1px solid #d8d8d8;
+      background: #fff;
+      color: #333;
+      border-radius: 999px;
+      padding: 0.45rem 1rem;
+      font: inherit;
+      font-size: 0.9rem;
+      cursor: pointer;
+    }
+    .pill:hover { border-color: #bbb; }
+    .pill.selected { background: #222; color: #fff; border-color: #222; }
+    .primary-btn {
+      width: 100%;
+      background: #222;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 0.8rem;
+      font: inherit;
+      font-size: 1rem;
+      cursor: pointer;
+      margin-bottom: 1.5rem;
+    }
+    .primary-btn:hover { background: #000; }
+    .home-list { list-style: none; margin: 0; padding: 0; }
+    .game-item, .stat-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+      padding: 0.7rem 0.85rem;
+      border: 1px solid #ececec;
+      border-radius: 8px;
+      background: #fff;
+      margin-bottom: 0.5rem;
+    }
+    .game-item { cursor: pointer; }
+    .game-item:hover { border-color: #ccc; background: #fcfcfc; }
+    .game-main { font-size: 0.95rem; }
+    .game-time { font-family: ui-monospace, monospace; font-size: 0.85rem; color: #777; }
+    .home-empty { color: #999; font-size: 0.9rem; padding: 0.25rem 0; }
+
+    /* --- Corrupt-storage wipe banner --- */
+    #wipe-banner {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 30;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.75rem;
+      background: #fde9c8;
+      color: #7a4a00;
+      border-bottom: 1px solid #f0d199;
+      padding: 0.5rem 0.75rem;
+      font-size: 0.85rem;
+    }
+    #wipe-banner[hidden] { display: none; }
+    #wipe-button {
+      background: #7a4a00;
+      color: #fff;
+      border: none;
+      border-radius: 4px;
+      padding: 0.3rem 0.7rem;
+      font: inherit;
+      font-size: 0.8rem;
+      cursor: pointer;
+    }
+
+    /* --- Generation spinner --- */
+    #spinner {
+      position: fixed;
+      inset: 0;
+      z-index: 40;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(250, 250, 250, 0.6);
+    }
+    #spinner[hidden] { display: none; }
+    .spinner-ring {
+      width: 2.5rem;
+      height: 2.5rem;
+      border: 3px solid #d8d8d8;
+      border-top-color: #222;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
   </style>
 </head>
 <body>
-  <header id="topbar">
-    <div id="title">Slitherlink</div>
+  <div id="wipe-banner" hidden>
+    <span>Saved data couldn't be read.</span>
+    <button id="wipe-button" type="button">Wipe and continue</button>
+  </div>
+
+  <header id="topbar" hidden>
+    <button id="home-button" type="button" aria-label="Home">
+      <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+        <path stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" d="M3 11l9-8 9 8M5 9.5V21h5v-6h4v6h5V9.5" />
+      </svg>
+    </button>
     <div id="puzzle-num">#1</div>
     <div id="timer" hidden>0:00</div>
     <button id="next-button" type="button" aria-label="Next puzzle" hidden>
@@ -176,7 +314,6 @@
         </svg>
       </button>
       <ul id="menu" role="menu" hidden>
-        <li role="none"><button role="menuitem" data-action="choose">Choose puzzle</button></li>
         <li role="none"><button role="menuitem" data-action="restart">Restart</button></li>
       </ul>
     </div>
@@ -184,7 +321,35 @@
 
   <main id="puzzle">loading...</main>
 
-  <div id="action-buttons">
+  <section id="home" hidden>
+    <div class="home-inner">
+      <h1 class="home-title">Slitherlink</h1>
+
+      <div class="home-section">
+        <div class="home-label">Difficulty</div>
+        <div id="diff-picker" class="pill-row"></div>
+      </div>
+
+      <div class="home-section">
+        <div class="home-label">Size</div>
+        <div id="size-picker" class="pill-row"></div>
+      </div>
+
+      <button id="new-game" class="primary-btn" type="button">New puzzle</button>
+
+      <div class="home-section">
+        <div class="home-label">In progress</div>
+        <ul id="resume-list" class="home-list"></ul>
+      </div>
+
+      <div class="home-section">
+        <div class="home-label">Solved</div>
+        <div id="stats-summary"></div>
+      </div>
+    </div>
+  </section>
+
+  <div id="action-buttons" hidden>
     <button data-action="undo" aria-label="Undo">
       <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
         <path stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" d="M9 14L4 9l5-5M4 9h11a5 5 0 0 1 5 5v0a5 5 0 0 1-5 5h-6" />
@@ -195,6 +360,10 @@
         <path stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" d="M15 14l5-5-5-5M20 9H9a5 5 0 0 0-5 5v0a5 5 0 0 0 5 5h6" />
       </svg>
     </button>
+  </div>
+
+  <div id="spinner" hidden>
+    <div class="spinner-ring" role="status" aria-label="Generating puzzle"></div>
   </div>
 
   <script type="module" src="main.js"></script>

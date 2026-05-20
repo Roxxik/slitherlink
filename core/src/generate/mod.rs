@@ -20,6 +20,16 @@ pub enum RegionAlgo {
     Metropolis,
 }
 
+/// Target difficulty for [`generate_seeded`]. The value is currently ignored —
+/// every variant produces the same propagate-solvable "easy" board — but it is
+/// threaded through the API so the UI can offer the choice today and the
+/// generator can branch on it later without changing any caller.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Difficulty {
+    Easy,
+    Hard,
+}
+
 /// Generates an easy-difficulty puzzle of the requested size, seeded by `seed`,
 /// using the [`Walk`](RegionAlgo::Walk) generator. Convenience wrapper around
 /// [`generate_with`].
@@ -27,17 +37,44 @@ pub fn generate(width: usize, height: usize, seed: u64) -> Puzzle {
     generate_with(width, height, seed, RegionAlgo::Walk)
 }
 
-/// Generates an easy-difficulty puzzle, deriving everything from a single `seed`.
+/// Generates the puzzle identified by `(width, height, difficulty, number)`.
+/// `number` is the per-category level number, not an RNG seed: the actual seed is
+/// derived internally by [`seed_from`].
 ///
 /// One [`Rng`] is seeded once and used first to pick a region generator and then
-/// to drive that generator, so the same seed always yields the same puzzle.
+/// to drive that generator, so the same coordinates always yield the same puzzle.
 /// This is the entry point the UI uses to introduce variation across puzzles:
 /// adding a generator (or, later, random parameter choices drawn from the same
 /// `Rng`) only means extending [`pick_algo`], not touching callers.
-pub fn generate_seeded(width: usize, height: usize, seed: u64) -> Puzzle {
-    let mut rng = Rng::new(seed);
+///
+/// Size, difficulty, and level number are folded into the RNG seed, so distinct
+/// categories diverge: easy-7x7-1 and hard-7x7-1 draw different loops. Difficulty
+/// does not yet change the generation *strategy* (e.g. clue-strip aggressiveness)
+/// — add that match where the region/strip work happens below.
+pub fn generate_seeded(width: usize, height: usize, difficulty: Difficulty, number: u64) -> Puzzle {
+    let mut rng = Rng::new(seed_from(width, height, difficulty, number));
     let algo = pick_algo(&mut rng);
     generate_with_rng(width, height, &mut rng, algo)
+}
+
+/// Derives a well-distributed RNG seed from a puzzle's category coordinates.
+/// Uses splitmix64 mixing so nearby level numbers (1, 2, 3, ...) and the small
+/// size/difficulty values still produce uncorrelated generator streams.
+fn seed_from(width: usize, height: usize, difficulty: Difficulty, number: u64) -> u64 {
+    fn mix(mut z: u64) -> u64 {
+        z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+        z ^ (z >> 31)
+    }
+    let diff = match difficulty {
+        Difficulty::Easy => 0,
+        Difficulty::Hard => 1,
+    };
+    let mut h = 0x9E37_79B9_7F4A_7C15_u64;
+    h = mix(h ^ width as u64);
+    h = mix(h ^ height as u64);
+    h = mix(h ^ diff);
+    mix(h ^ number)
 }
 
 /// Picks a region generator from `rng`. Extend `ALGOS` to add a new generator to
@@ -168,9 +205,18 @@ mod tests {
     #[test]
     fn generate_seeded_is_deterministic() {
         // Same seed must reproduce the same puzzle, including the algo pick.
-        let a = generate_seeded(7, 7, 12345);
-        let b = generate_seeded(7, 7, 12345);
+        let a = generate_seeded(7, 7, Difficulty::Easy, 12345);
+        let b = generate_seeded(7, 7, Difficulty::Easy, 12345);
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn generate_seeded_difficulty_changes_board() {
+        // Difficulty is folded into the seed, so the same number under different
+        // tiers draws a different loop rather than an identical board.
+        let easy = generate_seeded(7, 7, Difficulty::Easy, 999);
+        let hard = generate_seeded(7, 7, Difficulty::Hard, 999);
+        assert_ne!(easy, hard);
     }
 
     #[test]

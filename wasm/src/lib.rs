@@ -35,6 +35,24 @@ impl From<core::EdgeState> for EdgeState {
     }
 }
 
+/// Difficulty tier requested by the UI. Mirrors [`core::Difficulty`]; the value
+/// has no effect on generation yet (both tiers yield the same easy board).
+#[wasm_bindgen]
+#[derive(Clone, Copy)]
+pub enum Difficulty {
+    Easy = 0,
+    Hard = 1,
+}
+
+impl From<Difficulty> for core::Difficulty {
+    fn from(d: Difficulty) -> Self {
+        match d {
+            Difficulty::Easy => Self::Easy,
+            Difficulty::Hard => Self::Hard,
+        }
+    }
+}
+
 #[wasm_bindgen]
 pub struct Puzzle {
     inner: core::Puzzle,
@@ -133,12 +151,14 @@ pub fn is_solved(puzzle: &Puzzle, solution: &Solution) -> bool {
     core::is_solved(&puzzle.inner, &solution.inner)
 }
 
-/// Generates puzzle number `seed` at the given size. The seed selects the region
-/// generator (and seeds it), so each number is a distinct, reproducible puzzle.
-/// `seed` is a `u32` to stay an ordinary JS number rather than a `BigInt`.
+/// Generates the puzzle identified by `(width, height, difficulty, number)`.
+/// `number` is the per-category level number, not an RNG seed — the seed is
+/// derived internally from all four coordinates, so each category/number pair is
+/// a distinct, reproducible puzzle. `number` is a `u32` to stay an ordinary JS
+/// number rather than a `BigInt`.
 #[wasm_bindgen]
-pub fn generate(width: usize, height: usize, seed: u32) -> Puzzle {
-    Puzzle { inner: core::generate_seeded(width, height, seed as u64) }
+pub fn generate(width: usize, height: usize, difficulty: Difficulty, number: u32) -> Puzzle {
+    Puzzle { inner: core::generate_seeded(width, height, difficulty.into(), number as u64) }
 }
 
 #[wasm_bindgen]

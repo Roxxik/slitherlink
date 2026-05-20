@@ -5,7 +5,7 @@ use std::process::ExitCode;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use slitherlink_core::{
-    generate_seeded, generate_with, is_solved, propagate, LotteryRow, MetropolisBuilder,
+    generate_seeded, generate_with, is_solved, propagate, Difficulty, LotteryRow, MetropolisBuilder,
     ProposalAction, Puzzle, RegionAlgo, WalkBuilder,
 };
 
@@ -101,7 +101,8 @@ fn main() -> ExitCode {
             // No --algo: reproduce exactly what the UI shows (seed picks the generator).
             let puzzle = match algo {
                 Some(a) => generate_with(w, h, chosen, a),
-                None => generate_seeded(w, h, chosen),
+                // Difficulty isn't a CLI flag yet; reproduce the Easy tier.
+                None => generate_seeded(w, h, Difficulty::Easy, chosen),
             };
             if !is_solved(&puzzle, &propagate(&puzzle)) {
                 eprintln!("seed {chosen} did not produce a propagate-solvable puzzle");
